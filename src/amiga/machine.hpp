@@ -8,6 +8,7 @@
 #include "m68k/cpu.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <deque>
 #include <functional>
@@ -48,6 +49,14 @@ enum : uint16_t {
   INT_COPER = 1 << 4, INT_VERTB = 1 << 5, INT_BLIT = 1 << 6,
   INT_AUD0 = 1 << 7, INT_AUD1 = 1 << 8, INT_AUD2 = 1 << 9, INT_AUD3 = 1 << 10,
   INT_RBF = 1 << 11, INT_DSKSYN = 1 << 12, INT_EXTER = 1 << 13, INT_INTEN = 1 << 14,
+};
+
+struct BlitState {
+  int w = 0, h = 0, y = 0;  // size in words/rows, rows done
+  bool line = false;
+  int64_t start = 0;        // cpu.cycles when the first row starts
+  int64_t row_cycles = 1;   // CPU clocks per row
+  uint16_t aold = 0, bold = 0;  // previous A/B words (barrel shifter)
 };
 
 struct SpriteState {
@@ -136,6 +145,7 @@ public:
   m68k::Cpu cpu;
   bool trace = false;
   bool verbose = false;
+  bool blitlog_ = getenv("HOSTAGES_BLITLOG") != nullptr;  // debugging
   Disk disk;
 
   // CPU speed multiplier: the CPU gets cpu_speed × 454 cycles per scanline.
@@ -170,6 +180,9 @@ private:
   void custom_write(uint32_t reg, uint16_t v);
   uint16_t vhpos();
   void blit();
+  void blit_sync();    // run the rows of the active blit that are due
+  void blit_finish();  // complete the active blit now
+  void blit_row();
   void blit_line();
   void render_frame();
   void copper_reset();
@@ -232,6 +245,8 @@ private:
     int16_t bltmod_[4] = {};
     uint16_t bltdat_[3] = {};  // A B C
     bool blt_zero_ = true;
+    bool blt_active_ = false;
+    BlitState blit_;
     uint16_t potgo_ = 0;
     // disk
     uint32_t dskpt_ = 0;

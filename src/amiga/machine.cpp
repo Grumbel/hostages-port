@@ -238,6 +238,7 @@ void Machine::keyboard_line() {
 void Machine::run_line() {
   // Called when the CPU has consumed a scanline worth of cycles.
   sync_cias();
+  blit_sync();
   line_start_ += line_cycles_;
   audio_line();
   if (cia_[1].tod_pulse()) raise(INT_EXTER);  // CIA-B TOD counts HSYNC

@@ -9,16 +9,22 @@ Verified with scripted runs (tests/scenarios):
 - bootblock → stage 2 → part I (`apro1.`): intro with music, news ticker,
   manual check (bypassed), rank/mission menu, GIGN picture, briefing,
   plan map, team member selection, street phase (movement, timer)
-- part II (`it.`) loads and shows its control screen when started
-  directly (HOSTAGES_START_IT), reads keys
+- stage I completion (forced by pokes) → "Press Return" → helicopter
+  flight (graphics.library BltBitMap) → part II (`it.`) with the marksmen
+  positions handed over → roof: select HOTEL, choose a roof position,
+  descent view
+- spotlight collision in the street phase works (timed blitter); see
+  docs/spotlight_collision.md for the original bug and a disk patch
 
 ## Open
 
-- [ ] Play part I through to the end and verify the switch to part II
-      (stage 2 frees apro1 and loads it.) and part II itself, up to the
-      ending screens (`final.pc1`, "Press F10 to replay Part I")
-- [ ] Find how part I passes its result (team positions, mission) to
-      part II; then a test scenario can start part II properly
+- [ ] Play part I for real (marksmen reach the crosses without pokes)
+- [ ] Play part II through rappelling, window breaking and the embassy
+      interior to the ending screens (`final.pc1`, "Press F10 to replay
+      Part I") and the return to part I
+- [ ] Find out how part I hands its state to part II (it works, but the
+      mechanism is not understood: it.'s team table is never written by
+      it. itself)
 - [ ] Add scenarios for the other missions and the time-out/"team
       decimated" screens
 - [ ] Copper and display are rendered once per frame from the end-of-frame

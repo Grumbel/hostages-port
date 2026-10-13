@@ -60,6 +60,17 @@ No AmigaDOS file system.
   the end screens are entered.
 - apro1 has a write_file() ($6E94, mode 1006) that is never called; the
   disk write path (copy-on-write to the save dir) is therefore unused.
+- Stage I is done when every surviving marksman (records at -20902(a4),
+  28 bytes, alive = +18) occupies a target position (words at -206(a4),
+  14 bytes apart, value man+1); status function $1894. The scenario
+  tests/scenarios/part2.txt pokes these to reach part II.
+- The blitter must not be instantaneous: the spotlight collision blit
+  writes BLTBMOD after BLTSIZE (docs/spotlight_collision.md). The blitter
+  runs row by row in CPU time (Machine::blit_sync); HLE graphics calls
+  that touch chip RAM through the CPU are unaffected.
+- graphics.library calls used: InitRastPort, InitBitMap, SetAPen/BPen,
+  SetDrMd, RectFill, Move/Draw, WritePixel, BltBitMap (helicopter scene),
+  Own/DisownBlitter, WaitBlit.
 
 ## Tools
 - `tools/hdisk.py list|extract ADF [dir]` — custom disk format
@@ -74,7 +85,8 @@ No AmigaDOS file system.
   list), `HOSTAGES_SPRDUMP=1` (sprite state every 50 frames),
   `HOSTAGES_WATCHB=hexaddr` (log changes of a byte per frame),
   `HOSTAGES_START_IT=1` (start with part II; it lacks part I's state, so
-  only useful for smoke tests).
+  only useful for smoke tests), `HOSTAGES_BLITLOG=1` (log blitter register
+  writes that happen while a blit is running).
 
 ## Build
 ```

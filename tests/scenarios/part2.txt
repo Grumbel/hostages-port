@@ -1,0 +1,35 @@
+# Part I -> part II hand-over. Stage I is completed by poking the three
+# target positions (words at -206(a4) + 14*n, apro1 a4 = $148EE) to
+# DELTA/ECHO/MIKE instead of playing it; then the game shows "Press Return
+# to go on to the next screen", the helicopter flight, and stage 2 loads
+# it. (roof stage with the marksmen at F1-F3).
+1600 joy f
+1610 joy
+2000 key return
+2210 joy f
+2220 joy
+2300 joy d
+2306 joy
+2330 joy f
+2340 joy
+2800 key return
+2850 poke 14820 1 w
+2850 poke 1482e 2 w
+2850 poke 1483c 3 w
+2900 joy f
+2910 joy
+3000 shot stage1_done.ppm
+3400 key return
+3500 shot helicopter.ppm
+4500 shot roof.ppm
+4600 key f4
+4700 joy f
+4710 joy
+4800 shot hotel_position.ppm
+4900 key escape
+5200 shot rappel.ppm
+5300 joy f
+5340 joy
+5345 joy r
+5360 joy
+5600 shot descent.ppm

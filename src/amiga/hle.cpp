@@ -756,6 +756,43 @@ void Hle::gfx(int lvo) {
   // RastPort: +4 BitMap, +24 Mask, +25 FgPen, +26 BgPen, +28 DrawMode
   // BitMap: +0 BytesPerRow, +2 Rows, +5 Depth, +8 Planes[8]
   switch (lvo) {
+    case 30: {  // BltBitMap(a0 src, d0 sx, d1 sy, a1 dst, d2 dx, d3 dy, d4 w, d5 h,
+                //           d6 minterm, d7 mask, a2 temp) → planes
+      uint32_t src = A(0), dst = A(1);
+      int sx = int16_t(D(0)), sy = int16_t(D(1)), dx = int16_t(D(2)), dy = int16_t(D(3));
+      int w = int16_t(D(4)), h = int16_t(D(5));
+      uint8_t lf = uint8_t(D(6)), mask = uint8_t(D(7));
+      int sbpr = m.r16(src), dbpr = m.r16(dst);
+      int depth = std::min(m.r8(src + 5), m.r8(dst + 5));
+      int planes = 0;
+      std::vector<uint8_t> row(size_t(std::max(w, 0)));
+      for (int p = 0; p < depth && p < 8; ++p) {
+        if (!(mask & (1 << p))) continue;
+        ++planes;
+        uint32_t sp = m.r32(src + 8 + uint32_t(p) * 4), dp = m.r32(dst + 8 + uint32_t(p) * 4);
+        // Copy in the direction that is safe for overlapping areas.
+        bool up = dp == sp && dy > sy;
+        for (int i = 0; i < h; ++i) {
+          int y = up ? h - 1 - i : i;
+          for (int x = 0; x < w; ++x) {
+            int px = sx + x;
+            row[size_t(x)] = (m.r8(sp + uint32_t((sy + y) * sbpr + (px >> 3))) >> (7 - (px & 7))) & 1;
+          }
+          for (int x = 0; x < w; ++x) {
+            int px = dx + x;
+            uint32_t a = dp + uint32_t((dy + y) * dbpr + (px >> 3));
+            uint8_t bit = uint8_t(0x80 >> (px & 7));
+            uint8_t v = m.r8(a);
+            int b = row[size_t(x)], c = (v & bit) ? 1 : 0;
+            // minterm with A = 1 (the blitter's A channel is the mask)
+            bool d = (lf >> (4 | b << 1 | c)) & 1;
+            m.w8(a, d ? (v | bit) : (v & ~bit));
+          }
+        }
+      }
+      D(0) = uint32_t(planes);
+      return;
+    }
     case 198: {  // InitRastPort(a1)
       uint32_t rp = A(1);
       for (uint32_t i = 0; i < 100; ++i) m.w8(rp + i, 0);
@@ -766,7 +803,7 @@ void Hle::gfx(int lvo) {
       m.w16(rp + 34, 0xFFFF);  // LinePtrn
       return;
     }
-    case 228: return;  // WaitBlit: the blitter finishes instantly
+    case 228: m.blit_finish(); return;  // WaitBlit
     case 240:  // Move(a1 rp, d0 x, d1 y)
       m.w16(A(1) + 36, uint16_t(D(0)));
       m.w16(A(1) + 38, uint16_t(D(1)));
@@ -807,7 +844,8 @@ void Hle::gfx(int lvo) {
       m.w16(bm + 6, 0);
       return;
     }
-    case 456: case 462: return;  // OwnBlitter / DisownBlitter
+    case 456: m.blit_finish(); return;  // OwnBlitter: the blitter is idle afterwards
+    case 462: return;                    // DisownBlitter
     default: unknown(LIB_GFX, lvo); return;
   }
 }

@@ -147,9 +147,11 @@ void Machine::disk_dma() {
 // ---- registers ---------------------------------------------------------------
 
 uint16_t Machine::custom_read(uint32_t reg) {
+  blit_sync();
   switch (reg) {
-    case 0x002:  // DMACONR (blitter is always done)
-      return uint16_t((cs_.dmacon_ & 0x07FF) | (cs_.blt_zero_ ? 0x2000 : 0));
+    case 0x002:  // DMACONR: BBUSY while a blit runs, BZERO
+      return uint16_t((cs_.dmacon_ & 0x07FF) | (cs_.blt_active_ ? 0x4000 : 0) |
+                      (cs_.blt_zero_ ? 0x2000 : 0));
     case 0x004:  // VPOSR: PAL OCS Agnus, long frames, V8
       return uint16_t(0x8000 | ((vpos_ >> 8) & 1));
     case 0x006: return vhpos();
@@ -186,6 +188,10 @@ uint16_t Machine::vhpos() {
 }
 
 void Machine::custom_write(uint32_t reg, uint16_t v) {
+  blit_sync();
+  if (blitlog_ && cs_.blt_active_ && reg >= 0x040 && reg < 0x076)
+    log("[blit] write %03x=%04x during blit at pc=%06x: row %d/%d, %lld clocks after start\n",
+        reg, v, cpu.op_pc, cs_.blit_.y, cs_.blit_.h, (long long)(cpu.cycles - cs_.blit_.start));
   cs_.regs_[reg >> 1] = v;
   auto setclr = [](uint16_t& r, uint16_t v) {
     if (v & 0x8000) r |= v & 0x7FFF; else r &= ~v;
@@ -572,72 +578,124 @@ inline uint16_t minterm(uint8_t lf, uint16_t a, uint16_t b, uint16_t c) {
 }
 }  // namespace
 
+// The blitter takes time like the real one: a blit started by BLTSIZE runs
+// row by row while the CPU continues, and each row uses the registers as
+// they are when it is done. This matters for code that writes a register
+// right after BLTSIZE (Hostages sets BLTBMOD of its spotlight collision
+// blit one instruction late; see docs/spotlight_collision.md).
+
+namespace {
+// Approximate blitter memory cycles per word by used channels (A B C D);
+// one memory cycle is 2 CPU clocks.
+int blit_cycles_per_word(uint16_t con0) {
+  static const int table[16] = {
+      // ABCD bits: 8=A 4=B 2=C 1=D
+      2, 2, 2, 3, 3, 3, 3, 4, 2, 2, 2, 3, 3, 3, 3, 4};
+  return table[(con0 >> 8) & 15];
+}
+constexpr int BLIT_STARTUP_CYCLES = 4;  // CPU clocks before the first word
+}  // namespace
+
 void Machine::blit() {
+  if (cs_.blt_active_) blit_finish();  // a new BLTSIZE ends the old blit
   uint16_t size = cs_.regs_[0x058 >> 1];
   int h = size >> 6;
   int w = size & 0x3F;
   if (h == 0) h = 1024;
   if (w == 0) w = 64;
-  if (cs_.bltcon1_ & 1) {
-    blit_line();
-  } else {
-    bool useA = cs_.bltcon0_ & 0x800, useB = cs_.bltcon0_ & 0x400;
-    bool useC = cs_.bltcon0_ & 0x200, useD = cs_.bltcon0_ & 0x100;
-    uint8_t lf = uint8_t(cs_.bltcon0_);
-    int ash = cs_.bltcon0_ >> 12, bsh = cs_.bltcon1_ >> 12;
-    bool desc = cs_.bltcon1_ & 2;
-    bool fill = cs_.bltcon1_ & 0x18;
-    bool efe = cs_.bltcon1_ & 0x10;  // exclusive fill (else inclusive)
-    int inc = desc ? -2 : 2;
-    uint16_t aold = 0, bold = 0;
-    bool zero = true;
-    uint32_t& apt = cs_.bltpt_[0];
-    uint32_t& bpt = cs_.bltpt_[1];
-    uint32_t& cpt = cs_.bltpt_[2];
-    uint32_t& dpt = cs_.bltpt_[3];
-    for (int y = 0; y < h; ++y) {
-      bool fc = cs_.bltcon1_ & 4;  // FCI
-      for (int x = 0; x < w; ++x) {
-        if (useA) { cs_.bltdat_[0] = read16(apt); apt += uint32_t(inc); }
-        if (useB) { cs_.bltdat_[1] = read16(bpt); bpt += uint32_t(inc); }
-        if (useC) { cs_.bltdat_[2] = read16(cpt); cpt += uint32_t(inc); }
-        uint16_t a = cs_.bltdat_[0];
-        if (x == 0) a &= cs_.bltafwm_;
-        if (x == w - 1) a &= cs_.bltalwm_;
-        uint16_t as, bs;
-        if (!desc) {
-          as = uint16_t(((uint32_t(aold) << 16) | a) >> ash);
-          bs = uint16_t(((uint32_t(bold) << 16) | cs_.bltdat_[1]) >> bsh);
-        } else {
-          as = uint16_t(((uint32_t(a) << 16) | aold) >> (16 - ash));
-          bs = uint16_t(((uint32_t(cs_.bltdat_[1]) << 16) | bold) >> (16 - bsh));
-        }
-        aold = a;
-        bold = cs_.bltdat_[1];
-        uint16_t d = minterm(lf, as, bs, cs_.bltdat_[2]);
-        if (fill) {
-          uint16_t r = 0;
-          for (int bit = 0; bit < 16; ++bit) {
-            uint16_t m = uint16_t(1 << bit);
-            bool v = d & m;
-            if (efe) { fc ^= v; if (fc) r |= m; }
-            else { if (fc || v) r |= m; fc ^= v; }
-          }
-          d = r;
-        }
-        if (d) zero = false;
-        if (useD) { write16(dpt, d); dpt += uint32_t(inc); }
-      }
-      if (useA) apt += uint32_t(desc ? -cs_.bltmod_[0] : cs_.bltmod_[0]);
-      if (useB) bpt += uint32_t(desc ? -cs_.bltmod_[1] : cs_.bltmod_[1]);
-      if (useC) cpt += uint32_t(desc ? -cs_.bltmod_[2] : cs_.bltmod_[2]);
-      if (useD) dpt += uint32_t(desc ? -cs_.bltmod_[3] : cs_.bltmod_[3]);
-    }
-    cs_.blt_zero_ = zero;
+  BlitState& b = cs_.blit_;
+  b = BlitState{};
+  b.w = w;
+  b.h = h;
+  b.line = cs_.bltcon1_ & 1;
+  // Durations are in A500 time, scaled to the CPU speed setting.
+  double scale = double(line_cycles_) / CYCLES_PER_LINE;
+  int per_word = 2 * (b.line ? 4 : blit_cycles_per_word(cs_.bltcon0_));
+  b.row_cycles = std::max<int64_t>(1, int64_t(double(per_word * (b.line ? h : w)) * scale));
+  b.start = cpu.cycles + int64_t(BLIT_STARTUP_CYCLES * scale);
+  cs_.blt_active_ = true;
+  cs_.blt_zero_ = true;
+}
+
+void Machine::blit_sync() {
+  if (!cs_.blt_active_) return;
+  BlitState& b = cs_.blit_;
+  int rows = b.line ? 1 : b.h;
+  int64_t due = cpu.cycles < b.start ? 0 : (cpu.cycles - b.start) / b.row_cycles;
+  while (b.y < rows && b.y < due) blit_row();
+  if (b.y >= rows) {
+    cs_.blt_active_ = false;
+    raise(INT_BLIT);
   }
+}
+
+void Machine::blit_finish() {
+  if (!cs_.blt_active_) return;
+  BlitState& b = cs_.blit_;
+  int rows = b.line ? 1 : b.h;
+  while (b.y < rows) blit_row();
+  cs_.blt_active_ = false;
   raise(INT_BLIT);
-  // The blit happens instantly; charge a rough DMA cost to the CPU.
-  cpu.cycles += int64_t(w) * h * 2;
+}
+
+void Machine::blit_row() {
+  BlitState& b = cs_.blit_;
+  if (b.line) {
+    blit_line();
+    ++b.y;
+    return;
+  }
+  bool useA = cs_.bltcon0_ & 0x800, useB = cs_.bltcon0_ & 0x400;
+  bool useC = cs_.bltcon0_ & 0x200, useD = cs_.bltcon0_ & 0x100;
+  uint8_t lf = uint8_t(cs_.bltcon0_);
+  int ash = cs_.bltcon0_ >> 12, bsh = cs_.bltcon1_ >> 12;
+  bool desc = cs_.bltcon1_ & 2;
+  bool fill = cs_.bltcon1_ & 0x18;
+  bool efe = cs_.bltcon1_ & 0x10;  // exclusive fill (else inclusive)
+  int inc = desc ? -2 : 2;
+  uint32_t& apt = cs_.bltpt_[0];
+  uint32_t& bpt = cs_.bltpt_[1];
+  uint32_t& cpt = cs_.bltpt_[2];
+  uint32_t& dpt = cs_.bltpt_[3];
+  int w = b.w;
+  bool fc = cs_.bltcon1_ & 4;  // FCI
+  for (int x = 0; x < w; ++x) {
+    if (useA) { cs_.bltdat_[0] = read16(apt); apt += uint32_t(inc); }
+    if (useB) { cs_.bltdat_[1] = read16(bpt); bpt += uint32_t(inc); }
+    if (useC) { cs_.bltdat_[2] = read16(cpt); cpt += uint32_t(inc); }
+    uint16_t a = cs_.bltdat_[0];
+    if (x == 0) a &= cs_.bltafwm_;
+    if (x == w - 1) a &= cs_.bltalwm_;
+    uint16_t as, bs;
+    if (!desc) {
+      as = uint16_t(((uint32_t(b.aold) << 16) | a) >> ash);
+      bs = uint16_t(((uint32_t(b.bold) << 16) | cs_.bltdat_[1]) >> bsh);
+    } else {
+      as = uint16_t(((uint32_t(a) << 16) | b.aold) >> (16 - ash));
+      bs = uint16_t(((uint32_t(cs_.bltdat_[1]) << 16) | b.bold) >> (16 - bsh));
+    }
+    b.aold = a;
+    b.bold = cs_.bltdat_[1];
+    uint16_t d = minterm(lf, as, bs, cs_.bltdat_[2]);
+    if (fill) {
+      uint16_t r = 0;
+      for (int bit = 0; bit < 16; ++bit) {
+        uint16_t m = uint16_t(1 << bit);
+        bool v = d & m;
+        if (efe) { fc ^= v; if (fc) r |= m; }
+        else { if (fc || v) r |= m; fc ^= v; }
+      }
+      d = r;
+    }
+    if (d) cs_.blt_zero_ = false;
+    if (useD) { write16(dpt, d); dpt += uint32_t(inc); }
+  }
+  // Modulos are added at the end of each row, with their current values.
+  if (useA) apt += uint32_t(desc ? -cs_.bltmod_[0] : cs_.bltmod_[0]);
+  if (useB) bpt += uint32_t(desc ? -cs_.bltmod_[1] : cs_.bltmod_[1]);
+  if (useC) cpt += uint32_t(desc ? -cs_.bltmod_[2] : cs_.bltmod_[2]);
+  if (useD) dpt += uint32_t(desc ? -cs_.bltmod_[3] : cs_.bltmod_[3]);
+  ++b.y;
 }
 
 void Machine::blit_line() {
