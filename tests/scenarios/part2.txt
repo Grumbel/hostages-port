@@ -1,4 +1,6 @@
-# Part I -> part II hand-over. Stage I is completed by poking the three
+# Part I -> part II hand-over. In the game, the player presses Return on the
+# Esc menu/map once the marksmen are in position or dead. Here stage I is
+# completed by poking the three
 # target positions (words at -206(a4) + 14*n, apro1 a4 = $148EE) to
 # DELTA/ECHO/MIKE instead of playing it; then the game shows "Press Return
 # to go on to the next screen", the helicopter flight, and stage 2 loads

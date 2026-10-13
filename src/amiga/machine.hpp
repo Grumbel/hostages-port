@@ -146,6 +146,8 @@ public:
   bool trace = false;
   bool verbose = false;
   bool blitlog_ = getenv("HOSTAGES_BLITLOG") != nullptr;  // debugging
+  bool audlog_ = getenv("HOSTAGES_AUDLOG") != nullptr;    // debugging
+  uint64_t audlog_from_ = audlog_ ? strtoull(getenv("HOSTAGES_AUDLOG"), nullptr, 10) : 0;
   Disk disk;
 
   // CPU speed multiplier: the CPU gets cpu_speed × 454 cycles per scanline.
@@ -279,6 +281,9 @@ private:
   std::map<uint32_t, uint32_t> free_list_;
 
   std::vector<uint8_t> executed_;
+  uint32_t watch_pc_addr_ = 0;
+  uint8_t watch_pc_val_ = 0;
+  int watch_pc_budget_ = 40;
 };
 
 }  // namespace amiga

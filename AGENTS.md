@@ -60,7 +60,10 @@ No AmigaDOS file system.
   the end screens are entered.
 - apro1 has a write_file() ($6E94, mode 1006) that is never called; the
   disk write path (copy-on-write to the save dir) is therefore unused.
-- Stage I is done when every surviving marksman (records at -20902(a4),
+- Stage I ends when the player presses Return on the Esc menu/map once
+  the marksmen are in position or dead (the ticker then says "Press Return
+  to go on to the next screen or F10 to start again"). Internally it is
+  done when every surviving marksman (records at -20902(a4),
   28 bytes, alive = +18) occupies a target position (words at -206(a4),
   14 bytes apart, value man+1); status function $1894. The scenario
   tests/scenarios/part2.txt pokes these to reach part II.
@@ -86,7 +89,16 @@ No AmigaDOS file system.
   `HOSTAGES_WATCHB=hexaddr` (log changes of a byte per frame),
   `HOSTAGES_START_IT=1` (start with part II; it lacks part I's state, so
   only useful for smoke tests), `HOSTAGES_BLITLOG=1` (log blitter register
-  writes that happen while a blit is running).
+  writes that happen while a blit is running, and every blit start),
+  `HOSTAGES_WATCHPC=hexaddr` (log each change of a byte with the PC that
+  made it; checked after every instruction), `HOSTAGES_AUDLOG=frame`
+  (Paula register writes for three frames from `frame`).
+- The intro logo reads "HOSTAGE" by design: it is drawn from two letter
+  strings at -28727(a4) ("H S A E") and -28717(a4) ("O T G") by the
+  falling-letters routine $4D8A; there is no second S in the data.
+- Music: CIA-B timer A server ($B502, AddIntServer(13)); the game only
+  writes TAHI = $19, so the period is $19FF+1 E-clocks (106.6 Hz) with
+  the power-on latch low byte. $1299E is the player's re-entrancy flag.
 
 ## Build
 ```

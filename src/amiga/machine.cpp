@@ -20,6 +20,9 @@ Machine::Machine() : chip_(CHIP_SIZE), slow_(SLOW_SIZE), fb_(FB_W * FB_H) {
     throw QuitRequested{};
   };
   hle_ = std::make_unique<Hle>(*this);
+  // HOSTAGES_WATCHPC=hexaddr: log every change of a byte with the PC of the
+  // instruction that made it (debugging; slows the interpreter down).
+  if (const char* w = getenv("HOSTAGES_WATCHPC")) watch_pc_addr_ = uint32_t(strtoul(w, nullptr, 16));
 }
 
 Machine::~Machine() = default;
@@ -321,6 +324,15 @@ void Machine::execute(int64_t until) {
       log("%06x  %04x  d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x\n", pc, read16(pc), cpu.d[0],
           cpu.d[1], cpu.a[0], cpu.a[7], cpu.sr());
     cpu.step();
+    if (watch_pc_addr_) {
+      uint8_t v = read8(watch_pc_addr_);
+      if (v != watch_pc_val_ && watch_pc_budget_ > 0) {
+        --watch_pc_budget_;
+        log("[watchpc] %06x: %02x -> %02x at pc=%06x frame %llu line %d\n", watch_pc_addr_,
+            watch_pc_val_, v, cpu.op_pc, (unsigned long long)frame_count_, vpos_);
+      }
+      watch_pc_val_ = v;
+    }
   }
 }
 

@@ -239,6 +239,9 @@ void Machine::custom_write(uint32_t reg, uint16_t v) {
     case 0x092: cs_.ddfstrt_ = v & 0xFC; return;
     case 0x094: cs_.ddfstop_ = v & 0xFC; return;
     case 0x096: {
+      if (audlog_ && frame_count_ >= audlog_from_ && frame_count_ < audlog_from_ + 3 && (v & 0xF))
+        log("[aud] frame %llu line %3d DMACON %04x pc=%06x\n", (unsigned long long)frame_count_,
+            vpos_, v, cpu.op_pc);
       uint16_t old = cs_.dmacon_;
       setclr(cs_.dmacon_, v);
       for (int ch = 0; ch < 4; ++ch) {
@@ -260,6 +263,9 @@ void Machine::custom_write(uint32_t reg, uint16_t v) {
   }
   if (reg >= 0x0A0 && reg < 0x0E0) {
     int ch = (reg - 0x0A0) >> 4;
+    if (audlog_ && frame_count_ >= audlog_from_ && frame_count_ < audlog_from_ + 3)
+      log("[aud] frame %llu line %3d ch%d reg %x = %04x pc=%06x\n",
+          (unsigned long long)frame_count_, vpos_, ch, reg & 0xF, v, cpu.op_pc);
     AudioChannel& a = cs_.aud_[ch];
     switch (reg & 0xF) {
       case 0x0: a.lc = (a.lc & 0xFFFF) | uint32_t(v & 0x1F) << 16; break;
@@ -615,6 +621,12 @@ void Machine::blit() {
   b.start = cpu.cycles + int64_t(BLIT_STARTUP_CYCLES * scale);
   cs_.blt_active_ = true;
   cs_.blt_zero_ = true;
+  if (blitlog_)
+    log("[blit] frame %llu pc=%06x %dx%d con %04x %04x A %06x B %06x C %06x D %06x "
+        "mod %d %d %d %d fwm %04x lwm %04x\n", (unsigned long long)frame_count_, cpu.op_pc,
+        w, h, cs_.bltcon0_, cs_.bltcon1_, cs_.bltpt_[0], cs_.bltpt_[1], cs_.bltpt_[2],
+        cs_.bltpt_[3], cs_.bltmod_[0], cs_.bltmod_[1], cs_.bltmod_[2], cs_.bltmod_[3],
+        cs_.bltafwm_, cs_.bltalwm_);
 }
 
 void Machine::blit_sync() {
