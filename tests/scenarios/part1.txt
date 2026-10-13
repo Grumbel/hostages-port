@@ -1,0 +1,23 @@
+# Intro -> manual check (bypassed) -> Lieutenant / Mission TARGET ->
+# briefing -> select DELTA on the map -> street (sniper) phase.
+# Frames are emulated PAL frames; shots are written to the current dir.
+1600 joy f
+1610 joy
+2000 key return
+2200 shot menu.ppm
+2210 joy f
+2220 joy
+2300 joy d
+2306 joy
+2330 joy f
+2340 joy
+2500 shot briefing.ppm
+2800 key return
+2900 joy f
+2910 joy
+3000 shot map.ppm
+3080 joy f
+3090 joy
+3300 joy r
+3500 joy
+3600 shot street.ppm

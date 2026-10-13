@@ -1,0 +1,5 @@
+build*/
+result
+__pycache__/
+*.ppm
+*.wav
