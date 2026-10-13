@@ -1,0 +1,12 @@
+# "Hostages": ranks can be chosen freely (no access codes in this release).
+1600 joy f
+1610 joy
+2000 joy d
+2006 joy
+2040 joy d
+2046 joy
+2060 joy f
+2066 joy
+2150 joy f
+2160 joy
+2600 shot mission.ppm

@@ -6,26 +6,40 @@ Port of the Amiga version of **Hostages** (Infogrames, 1989; also known as
 The game's original 68000 code runs on a small runtime that provides
 exactly what the code expects from an Amiga 500, so no Kickstart ROM and no
 extracted files are needed – the game boots straight from the original disk
-image:
+image. Two releases are supported:
+
+- **Hostage** (`Hostage (Infogrames).adf`): Infogrames' trackloader disk
+  (custom bootblock, own file directory, manual word check, rank access
+  codes);
+- **Hostages** (`Hostages (1988)(Infogrames)[cr].adf`): the European release
+  as a cracked AmigaDOS disk (startup-sequence runs `apro1.` and then
+  `it.`, an Intuition screen, no checks). It has the "HOSTAGES" logo, the
+  mission "JUPITER" instead of "ASSAULT" and different intro music.
+
+What is emulated:
 
 - the parts of Kickstart the game uses, emulated at the library level:
-  exec (memory, lists, ports, signals, interrupt servers, devices),
-  trackdisk.device on the ADF, a few graphics.library drawing calls
-  (InitRastPort/InitBitMap/RectFill/Move/Draw…) and the boot strap that runs
-  the bootblock;
+  exec (memory with real MemHeaders, lists, ports, signals, interrupt
+  servers, devices), trackdisk.device on the ADF, the boot strap that runs
+  the bootblock, or for an AmigaDOS disk a CLI that executes
+  s/startup-sequence, dos.library on the disk's OFS file system (Open/Read/
+  Lock/Examine/LoadSeg…), Intuition screens/windows and the graphics.library
+  calls used (RastPort drawing, BltBitMap, LoadRGB4, AllocRaster…);
 - the custom chips the game programs directly: copper and bitplane display,
   sprites, blitter, Paula audio DMA, disk DMA, the two CIAs (keyboard,
   joystick fire, music timer, drive control).
 
-The manual word check ("enter word N on line N of page N") is bypassed by
-default, much like a WHDLoad install patch: any answer, including just
-Return, is accepted.
+The manual word check of "Hostage" ("enter word N on line N of page N") is
+bypassed by default, much like a WHDLoad install patch: any answer,
+including just Return, is accepted. `--skip-codes` also skips the secret
+access codes for the CAPTAIN and COMMANDER ranks (the end screens give
+them: HPETS for Captain, EDUAB for Commander); "Hostages" has no codes.
 
 ## Requirements
 
-The original disk image `Hostage (Infogrames).adf` (not included). The game
-looks for it in the current directory, `assets/` and the install data dir,
-or it can be given on the command line.
+One of the two disk images (not included). The game looks for them in the
+current directory, `assets/` and the install data dir, or the ADF can be
+given on the command line.
 
 ## Build
 
@@ -46,6 +60,7 @@ hostages [options] [disk.adf]
   --save DIR       directory for the written disk (default $XDG_DATA_HOME/hostages)
   --speed X        CPU speed multiplier (default 1 = A500)
   --protection     keep the manual word check
+  --skip-codes     accept any rank access code
   --fast           run unthrottled
 ```
 

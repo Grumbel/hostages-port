@@ -21,7 +21,23 @@ public:
   void flush();
   const std::vector<uint8_t>& image() const { return img_; }
 
+  // ---- AmigaDOS (OFS) file system, read-only -----------------------------
+  // True if the disk has a valid AmigaDOS root block.
+  bool is_dos() const;
+  // Header block of a file or directory ("s/startup-sequence", "df0:x",
+  // case-insensitive); the root block for "" or ":"; -1 if not found.
+  int find(const std::string& path) const;
+  bool is_dir(int block) const;
+  // Contents of the file whose header block is `block`.
+  bool read_file(int block, std::vector<uint8_t>& out) const;
+  std::string entry_name(int block) const;
+  uint32_t file_size(int block) const;
+  // Header blocks of the entries of a directory.
+  std::vector<int> list_dir(int block) const;
+  int parent(int block) const;
+
 private:
+  uint32_t l(int block, int index) const;  // big-endian long of a block
   std::vector<uint8_t> img_;
   std::string save_path_;
   bool dirty_ = false;

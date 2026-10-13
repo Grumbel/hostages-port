@@ -1,0 +1,14 @@
+# args: --skip-codes
+# Rank COMMANDER without the access code: the prompt answers OK at once,
+# then the mission starts with "Your mission, COMMANDER".
+1600 joy f
+1610 joy
+2000 key return
+2205 joy d
+2215 joy
+2260 joy f
+2270 joy
+2350 joy f
+2360 joy
+2400 shot code_ok.ppm
+2900 shot mission.ppm

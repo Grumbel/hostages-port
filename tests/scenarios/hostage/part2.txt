@@ -1,7 +1,7 @@
 # Part I -> part II hand-over. In the game, the player presses Return on the
 # Esc menu/map once the marksmen are in position or dead. Here stage I is
 # completed by poking the three
-# target positions (words at -206(a4) + 14*n, apro1 a4 = $148EE) to
+# target positions (words at -206(a4) + 14*n) to
 # DELTA/ECHO/MIKE instead of playing it; then the game shows "Press Return
 # to go on to the next screen", the helicopter flight, and stage 2 loads
 # it. (roof stage with the marksmen at F1-F3).
@@ -15,9 +15,9 @@
 2330 joy f
 2340 joy
 2800 key return
-2850 poke 14820 1 w
-2850 poke 1482e 2 w
-2850 poke 1483c 3 w
+2850 pokea4 -206 1 w
+2850 pokea4 -192 2 w
+2850 pokea4 -178 3 w
 2900 joy f
 2910 joy
 3000 shot stage1_done.ppm

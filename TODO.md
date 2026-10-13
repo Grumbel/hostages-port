@@ -2,8 +2,9 @@
 
 ## Status (Oct 2026)
 
-Boots from the original ADF and runs the original code on the emulated
-A500 (68000 interpreter + chipset + exec/trackdisk HLE).
+Boots from the original ADFs ("Hostage" trackloader disk and the
+"Hostages" AmigaDOS disk) and runs the original code on the emulated A500
+(68000 interpreter + chipset + exec/trackdisk/dos/Intuition HLE).
 
 Verified with scripted runs (tests/scenarios):
 - bootblock → stage 2 → part I (`apro1.`): intro with music, news ticker,
@@ -15,6 +16,9 @@ Verified with scripted runs (tests/scenarios):
   descent view
 - spotlight collision in the street phase works (timed blitter); see
   docs/spotlight_collision.md for the original bug and a disk patch
+- "Hostages": intro, menu (free rank choice), mission, stage I completion
+  → helicopter → CLI starts part II → roof (tests/scenarios/hostages)
+- --skip-codes: COMMANDER mission on "Hostage" without the access code
 
 ## Open
 
@@ -27,6 +31,13 @@ Verified with scripted runs (tests/scenarios):
       it. itself)
 - [ ] Add scenarios for the other missions and the time-out/"team
       decimated" screens
+- [ ] Music "a little off" (user report): compare a recording of a real
+      emulator with `--wav` output; check CIA-B timer A latch low byte
+      (only TAHI is written) and the A500 audio filter model. Note the two
+      releases have different intro music data.
+- [ ] Check whether the spotlight collision bug (docs/spotlight_collision.md)
+      exists in "Hostages" too (same street code?)
+- [ ] dos.library writes are kept in memory only (no game writes seen)
 - [ ] Copper and display are rendered once per frame from the end-of-frame
       state of CPU-written registers; fine for the game's static copper
       lists, revisit if a screen shows tearing or palette splits

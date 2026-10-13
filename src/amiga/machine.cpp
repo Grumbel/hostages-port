@@ -9,7 +9,8 @@
 
 namespace amiga {
 
-Machine::Machine() : chip_(CHIP_SIZE), slow_(SLOW_SIZE), fb_(FB_W * FB_H) {
+Machine::Machine()
+    : chip_(CHIP_SIZE), slow_(SLOW_SIZE), fb_(FB_W * FB_H), view_(FB_W * VIEW_H) {
   ram = chip_.data();
   ram_size = CHIP_SIZE;
   cpu.bus = this;
@@ -49,19 +50,28 @@ std::string Machine::cstr(uint32_t a, size_t max) {
 void Machine::add_free(uint32_t addr, uint32_t size) { free_list_[addr] = size; }
 
 uint32_t Machine::alloc(uint32_t size, bool chip, bool clear) {
+  // Like exec with an A500 trapdoor expansion: the $C00000 RAM has a higher
+  // priority than chip RAM, so requests that do not need chip RAM are
+  // served from there first. (The "Hostages" release depends on this: part
+  // I leaves its buffers allocated, and part II needs the chip RAM.)
+  if (!chip)
+    if (uint32_t a = alloc_in(size, SLOW_BASE, SLOW_BASE + SLOW_SIZE, clear)) return a;
+  return alloc_in(size, 0, CHIP_SIZE, clear);
+}
+
+uint32_t Machine::alloc_in(uint32_t size, uint32_t lo, uint32_t hi, bool clear) {
   size = (size + 7) & ~7u;
   if (size == 0) size = 8;
-  // Lowest address first: chip RAM is used before slow RAM, so programs
-  // that forget MEMF_CHIP for DMA buffers still work.
   for (auto it = free_list_.begin(); it != free_list_.end(); ++it) {
     if (it->second < size) continue;
-    if (chip && it->first + size > CHIP_SIZE) continue;
+    if (it->first < lo || it->first + size > hi) continue;
     uint32_t a = it->first;
     uint32_t rest = it->second - size;
     free_list_.erase(it);
     if (rest) free_list_[a + size] = rest;
     if (clear)
       for (uint32_t i = 0; i < size; i += 4) write32(a + i, 0);
+    hle_->update_memlist();
     return a;
   }
   return 0;
@@ -86,12 +96,14 @@ void Machine::free(uint32_t addr, uint32_t size) {
       free_list_.erase(it);
     }
   }
+  hle_->update_memlist();
 }
 
-uint32_t Machine::avail(bool chip, bool largest) const {
+uint32_t Machine::avail(bool chip, bool largest, bool fast) const {
   uint32_t total = 0;
   for (auto& [a, s] : free_list_) {
     if (chip && a >= CHIP_SIZE) continue;
+    if (fast && a < CHIP_SIZE) continue;
     total = largest ? std::max(total, s) : total + s;
   }
   return total;
@@ -112,30 +124,46 @@ bool Machine::boot(const std::string& adf_path, const std::string& save_path) {
 }
 
 namespace {
+enum class PatchKind { Protection, AccessCodes };
+
 struct Patch {
+  PatchKind kind;
   const char* program;
   uint32_t offset;           // in the code hunk
   std::vector<uint16_t> old, now;
   const char* what;
 };
 
+// Patches for the "Hostage" release (trackloader disk). The "Hostages"
+// crack (AmigaDOS disk) has neither check: its programs do not match.
 const Patch patches[] = {
     // Manual word check: the wrong-answer path clears the "correct" flag
     // (clr.b -2(a5)); without it every answer, even an empty one, passes.
-    {"apro1.", 0x6958, {0x422D, 0xFFFE}, {0x4E71, 0x4E71}, "manual protection"},
+    {PatchKind::Protection, "apro1.", 0x6958, {0x422D, 0xFFFE}, {0x4E71, 0x4E71},
+     "manual protection"},
+    // Rank access codes (HPETS for Captain, EDUAB for Commander): the input
+    // loop runs while fewer than 5 letters were typed ("bcc.w check" at
+    // $3F9C becomes "bra.w check"), then the code is compared with strcmp
+    // and "bne error" ($41AC) shows ERROR. Patched, the prompt is answered
+    // "OK" right away.
+    {PatchKind::AccessCodes, "apro1.", 0x3F9C, {0x6400}, {0x6000}, "rank access code prompt"},
+    {PatchKind::AccessCodes, "apro1.", 0x41AC, {0x6638}, {0x4E71}, "rank access code check"},
 };
 }  // namespace
 
 void Machine::program_loaded(const std::string& name, const std::vector<uint32_t>& addrs,
                              const std::vector<uint32_t>& sizes) {
+  if (addrs.size() > 1) program_a4_ = addrs[1] + 0x7FFE;
   if (verbose) {
     log("[program] %s:", name.c_str());
     for (size_t i = 0; i < addrs.size(); ++i) log(" %06x+%u", addrs[i], sizes[i]);
     log("\n");
   }
-  if (!bypass_protection || addrs.empty()) return;
+  if (addrs.empty()) return;
   for (const Patch& p : patches) {
     if (name != p.program) continue;
+    if (p.kind == PatchKind::Protection && !bypass_protection) continue;
+    if (p.kind == PatchKind::AccessCodes && !skip_access_codes) continue;
     uint32_t a = addrs[0] + p.offset;
     bool match = p.offset + 2 * p.old.size() <= sizes[0];
     for (size_t i = 0; match && i < p.old.size(); ++i) match = read16(a + 2 * uint32_t(i)) == p.old[i];
@@ -162,8 +190,8 @@ bool Machine::line_a(uint16_t op) {
     switch (idx) {
       case TRAP_RETURN:
         if (call_depth_ == 0) {
-          log("program returned to the strap (d0=%d)\n", int(cpu.d[0]));
-          throw QuitRequested{};
+          hle_->program_exit();
+          return true;
         }
         throw ReturnFromCall{};
       case TRAP_BOOT_DONE:
@@ -264,7 +292,13 @@ void Machine::idle_lines(int n) {
 }
 
 void Machine::end_of_frame() {
+  hle_->before_frame();
+  first_bpl_line_ = -1;
   render_frame();
+  if (first_bpl_line_ >= 0)
+    view_top_ = std::clamp(first_bpl_line_ - FB_VSTART, 0, FB_H - VIEW_H);
+  std::copy(fb_.begin() + long(view_top_) * FB_W, fb_.begin() + long(view_top_ + VIEW_H) * FB_W,
+            view_.begin());
   ++frame_count_;
   if (ram_hash_every > 0 && frame_count_ % uint64_t(ram_hash_every) == 0) {
     uint64_t h = 1469598103934665603ull;
@@ -295,7 +329,7 @@ void Machine::end_of_frame() {
         (unsigned long long)frame_count_, cpu.pc, cs_.diwstrt_, cs_.diwstop_, cs_.ddfstrt_,
         cs_.ddfstop_, cs_.bplcon0_, cs_.cop1lc_);
   if (host_) {
-    host_->frame(fb_.data());
+    host_->frame(view_.data());
     host_->audio(audio_buf_.data(), audio_buf_.size() / 2);
   }
   audio_buf_.clear();

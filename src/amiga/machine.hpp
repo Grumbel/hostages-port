@@ -34,10 +34,13 @@ constexpr double PAULA_CLOCK = 3546895.0;
 constexpr double FRAME_HZ = CPU_HZ / (CYCLES_PER_LINE * LINES_PER_FRAME);  // 49.92
 constexpr double ECLOCK_PER_LINE = CYCLES_PER_LINE / 10.0;
 
-// Output framebuffer (lores pixels). Both programs show an Atari-ST style
-// 320×200 screen at the standard display window origin $2C81.
+// Rendered frame: lores pixels of the PAL display area from $2C81.
 constexpr int FB_W = 320;
-constexpr int FB_H = 200;
+constexpr int FB_H = 256;
+// The game shows Atari-ST style 320×200 screens; the host gets a 200-line
+// view that follows the first displayed bitplane line (the "Hostage"
+// release uses line $2C, the Intuition screen of "Hostages" $3B).
+constexpr int VIEW_H = 200;
 constexpr int FB_HSTART = 0x81;  // lores pixel position of fb x=0
 constexpr int FB_VSTART = 0x2C;  // beam line of fb y=0
 
@@ -86,7 +89,7 @@ struct AudioChannel {
 // Host side of the machine (SDL front end).
 struct Host {
   virtual ~Host() = default;
-  // Called once per emulated frame with the FB_W×FB_H RGB888 framebuffer.
+  // Called once per emulated frame with the FB_W×VIEW_H RGB888 view.
   virtual void frame(const uint32_t* fb) = 0;
   // Audio samples (interleaved stereo, signed 16-bit) produced this frame.
   virtual void audio(const int16_t* samples, size_t frames) = 0;
@@ -118,8 +121,10 @@ public:
 
   // Memory allocator (first fit, chip or slow RAM like exec's MemHeaders).
   uint32_t alloc(uint32_t size, bool chip, bool clear = true);
+  // Allocate within [lo, hi).
+  uint32_t alloc_in(uint32_t size, uint32_t lo, uint32_t hi, bool clear = true);
   void free(uint32_t addr, uint32_t size);
-  uint32_t avail(bool chip, bool largest) const;
+  uint32_t avail(bool chip, bool largest, bool fast = false) const;
   void add_free(uint32_t addr, uint32_t size);
 
   // Call 68k code at `addr` with the given registers (a7 is managed).
@@ -156,8 +161,13 @@ public:
   // Called by the HLE when stage 2 starts a program it has loaded.
   void program_loaded(const std::string& name, const std::vector<uint32_t>& addrs,
                       const std::vector<uint32_t>& sizes);
+  // Small-data base (a4) of the program started last: its data hunk + $7FFE
+  // (both programs are compiled with the small data model).
+  uint32_t program_a4() const { return program_a4_; }
   // Bypass the manual word check (on by default, --protection keeps it).
   bool bypass_protection = true;
+  // Accept any rank access code (Captain/Commander) without knowing it.
+  bool skip_access_codes = false;
 
   // Coverage: record executed instruction addresses (chip RAM).
   std::string coverage_path;
@@ -268,6 +278,9 @@ private:
 
   // display
   std::vector<uint32_t> fb_;
+  std::vector<uint32_t> view_;
+  int first_bpl_line_ = -1;  // first line with bitplanes in the current frame
+  int view_top_ = 0;         // fb row shown at the top of the view
   // audio
   std::vector<int16_t> audio_buf_;
   double audio_frac_ = 0;
@@ -281,6 +294,7 @@ private:
   std::map<uint32_t, uint32_t> free_list_;
 
   std::vector<uint8_t> executed_;
+  uint32_t program_a4_ = 0;
   uint32_t watch_pc_addr_ = 0;
   uint8_t watch_pc_val_ = 0;
   int watch_pc_budget_ = 40;

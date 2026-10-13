@@ -27,6 +27,7 @@ add_library(amiga STATIC
   src/amiga/disk.hpp
   src/amiga/hle.cpp
   src/amiga/hle.hpp
+  src/amiga/hunk.hpp
 )
 target_link_libraries(amiga PUBLIC m68k)
 

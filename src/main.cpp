@@ -18,6 +18,7 @@ namespace {
 //   key <SDL key name> [down|up|tap]   joy <subset of "udlrf">
 //   mouse <dx> <dy>   lmb|rmb <0|1>   shot <file.ppm>   quit
 //   poke <hexaddr> <hexvalue> [b|w|l]   (force a game variable)
+//   pokea4 <offset> <hexvalue> [b|w|l]  (relative to the program's a4)
 struct ScriptEvent {
   int frame;
   std::string cmd;
@@ -129,16 +130,16 @@ public:
       return false;
     }
     win = SDL_CreateWindow("Hostages", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                           amiga::FB_W * scale, amiga::FB_H * scale * 15 / 16,
+                           amiga::FB_W * scale, amiga::VIEW_H * scale * 15 / 16,
                            SDL_WINDOW_RESIZABLE);
     if (!win) return false;
     ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     // PAL lores pixels are slightly wider than tall (a 320×256 frame is 4:3).
-    SDL_RenderSetLogicalSize(ren, amiga::FB_W, amiga::FB_H * 15 / 16);
+    SDL_RenderSetLogicalSize(ren, amiga::FB_W, amiga::VIEW_H * 15 / 16);
     tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                            amiga::FB_W, amiga::FB_H);
+                            amiga::FB_W, amiga::VIEW_H);
     SDL_AudioSpec want{}, have{};
     want.freq = 48000;
     want.format = AUDIO_S16SYS;
@@ -305,6 +306,15 @@ public:
         machine->mouse_move(std::atoi(e.args[0].c_str()), std::atoi(e.args[1].c_str()));
       } else if ((e.cmd == "lmb" || e.cmd == "rmb") && !e.args.empty()) {
         machine->mouse_button(e.cmd == "lmb" ? 0 : 1, e.args[0] != "0");
+      } else if (e.cmd == "pokea4" && e.args.size() >= 2) {
+        // pokea4 <signed decimal offset> <hexvalue> [b|w|l]: relative to the
+        // running program's small-data base (offsets as in the disassembly)
+        uint32_t a = machine->program_a4() + uint32_t(std::atoi(e.args[0].c_str()));
+        uint32_t v = uint32_t(std::strtoul(e.args[1].c_str(), nullptr, 16));
+        char sz = e.args.size() > 2 ? e.args[2][0] : 'b';
+        if (sz == 'l') machine->w32(a, v);
+        else if (sz == 'w') machine->w16(a, uint16_t(v));
+        else machine->w8(a, uint8_t(v));
       } else if (e.cmd == "poke" && e.args.size() >= 2) {
         // poke <hexaddr> <hexvalue> [b|w|l]: force a game variable (test
         // scenarios use it to reach states that are hard to play into)
@@ -327,8 +337,8 @@ public:
   void save_screenshot(const uint32_t* fb) {
     FILE* f = fopen(screenshot_path.c_str(), "wb");
     if (!f) return;
-    fprintf(f, "P6\n%d %d\n255\n", amiga::FB_W, amiga::FB_H);
-    for (int i = 0; i < amiga::FB_W * amiga::FB_H; ++i) {
+    fprintf(f, "P6\n%d %d\n255\n", amiga::FB_W, amiga::VIEW_H);
+    for (int i = 0; i < amiga::FB_W * amiga::VIEW_H; ++i) {
       uint8_t px[3] = {uint8_t(fb[i] >> 16), uint8_t(fb[i] >> 8), uint8_t(fb[i])};
       fwrite(px, 1, 3, f);
     }
@@ -367,9 +377,11 @@ public:
 void usage() {
   fprintf(stderr,
           "usage: hostages [options] [disk.adf]\n"
-          "  disk.adf         the original game disk\n"
-          "                   (default: \"Hostage (Infogrames).adf\" in the current\n"
-          "                   directory or the install data dir)\n"
+          "  disk.adf         the game disk: \"Hostage\" (Infogrames trackloader\n"
+          "                   disk) or \"Hostages\" (AmigaDOS disk); default: one of\n"
+          "                   \"Hostage (Infogrames).adf\",\n"
+          "                   \"Hostages (1988)(Infogrames)[cr].adf\" in the current\n"
+          "                   directory, assets/ or the install data dir\n"
           "  --scale N        window scale (default 3)\n"
           "  --save DIR       directory for the written disk (game saves)\n"
           "                   (default: $XDG_DATA_HOME/hostages)\n"
@@ -380,6 +392,7 @@ void usage() {
           "  --frames N       quit after N frames\n"
           "  --fast           run unthrottled\n"
           "  --protection     keep the manual word check\n"
+          "  --skip-codes     accept any rank access code (Captain/Commander)\n"
           "  --wav FILE       record audio\n"
           "  --coverage FILE  write executed code addresses\n"
           "  --ram-hash N     log a RAM hash every N frames\n"
@@ -395,7 +408,7 @@ int main(int argc, char** argv) {
   std::string adf_path, save_dir;
   int scale = 3;
   double speed = 1.0;
-  bool verbose = false, trace = false, fast = false, protection = false;
+  bool verbose = false, trace = false, fast = false, protection = false, skip_codes = false;
   int shot_frame = -1, quit_after = -1;
   std::string shot_path, script_path, wav_path, coverage_path;
   int ram_hash = 0;
@@ -411,6 +424,7 @@ int main(int argc, char** argv) {
     else if (a == "--frames" && i + 1 < argc) quit_after = std::atoi(argv[++i]);
     else if (a == "--fast") fast = true;
     else if (a == "--protection") protection = true;
+    else if (a == "--skip-codes") skip_codes = true;
     else if (a == "--wav" && i + 1 < argc) wav_path = argv[++i];
     else if (a == "--coverage" && i + 1 < argc) coverage_path = argv[++i];
     else if (a == "--ram-hash" && i + 1 < argc) ram_hash = std::atoi(argv[++i]);
@@ -421,12 +435,15 @@ int main(int argc, char** argv) {
   }
   if (adf_path.empty()) {
     for (std::string cand : {std::string("."), std::string("assets"), std::string(HOSTAGES_DATADIR)}) {
-      std::string p = cand + "/Hostage (Infogrames).adf";
-      if (std::filesystem::exists(p)) { adf_path = p; break; }
+      for (const char* name : {"Hostage (Infogrames).adf", "Hostages (1988)(Infogrames)[cr].adf"}) {
+        std::string p = cand + "/" + name;
+        if (std::filesystem::exists(p)) { adf_path = p; break; }
+      }
+      if (!adf_path.empty()) break;
     }
   }
   if (adf_path.empty()) {
-    fprintf(stderr, "Cannot find the game disk (Hostage (Infogrames).adf).\n");
+    fprintf(stderr, "Cannot find the game disk.\n");
     usage();
     return 1;
   }
@@ -445,7 +462,10 @@ int main(int argc, char** argv) {
   machine.coverage_path = coverage_path;
   machine.ram_hash_every = ram_hash;
   machine.bypass_protection = !protection;
-  if (!machine.boot(adf_path, save_dir + "/disk.adf")) return 1;
+  machine.skip_access_codes = skip_codes;
+  // Disk writes go to a copy named after the ADF (one per release).
+  std::string save_name = std::filesystem::path(adf_path).filename().string();
+  if (!machine.boot(adf_path, save_dir + "/" + save_name)) return 1;
 
   SdlHost host;
   host.machine = &machine;

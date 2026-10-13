@@ -228,7 +228,9 @@ void Machine::custom_write(uint32_t reg, uint16_t v) {
     case 0x070: cs_.bltdat_[2] = v; return;
     case 0x072: cs_.bltdat_[1] = v; return;
     case 0x074: cs_.bltdat_[0] = v; return;
-    case 0x080: cs_.cop1lc_ = (cs_.cop1lc_ & 0xFFFF) | uint32_t(v & 0x1F) << 16; return;
+    case 0x080:
+      if (verbose) log("[copper] COP1LC hi=%04x pc=%06x frame %llu\n", v, cpu.op_pc, (unsigned long long)frame_count_);
+      cs_.cop1lc_ = (cs_.cop1lc_ & 0xFFFF) | uint32_t(v & 0x1F) << 16; return;
     case 0x082: cs_.cop1lc_ = (cs_.cop1lc_ & 0xFFFF0000) | (v & 0xFFFE); return;
     case 0x084: cs_.cop2lc_ = (cs_.cop2lc_ & 0xFFFF) | uint32_t(v & 0x1F) << 16; return;
     case 0x086: cs_.cop2lc_ = (cs_.cop2lc_ & 0xFFFF0000) | (v & 0xFFFE); return;
@@ -409,6 +411,7 @@ void Machine::render_line(int line) {
   }
   for (int x = 0; x < FB_W; ++x) out[x] = bg;
   uint8_t pf[FB_W] = {};  // playfield priority per pixel (0 = transparent)
+  if (active && first_bpl_line_ < 0) first_bpl_line_ = line;
   if (active) render_playfield(out, pf, nplanes, hires, ham, dpf, hstart, hstop);
   render_sprites(line, out, pf);
 }

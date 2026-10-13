@@ -1,0 +1,26 @@
+# "Hostages" (AmigaDOS disk): part I (APRO1.) -> stage I completed by
+# poking the three target positions (first slot of each 3-slot row at
+# -7600(a4)) -> Esc to the map -> Return -> helicopter -> the CLI starts
+# "it. -s 3000" (part II) on the roof.
+1600 joy f
+1610 joy
+2000 key return
+3100 joy d
+3106 joy
+3150 joy f
+3160 joy
+3800 key return
+4100 pokea4 -7600 1 w
+4100 pokea4 -7586 2 w
+4100 pokea4 -7572 3 w
+4150 key return
+4500 joy f
+4510 joy
+4700 pokea4 -7600 1 w
+4700 pokea4 -7586 2 w
+4700 pokea4 -7572 3 w
+4800 key escape
+5100 shot stage1_done.ppm
+5300 key return
+5500 shot helicopter.ppm
+7500 shot roof.ppm
