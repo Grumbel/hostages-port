@@ -225,7 +225,11 @@ public:
   std::string status_msg;
   int status_until = 0;  // frame_no when status_msg clears
   bool pad_back_held = false;
-  bool pad_menu_nav[6] = {};  // up down left right a b edge track
+  bool pad_menu_nav[6] = {};  // up down left right a confirm edge track
+  // After closing the menu, ignore game input until the key/button that
+  // closed it (and other face controls) are released, so the game does
+  // not see the same press as fire/Esc/Return.
+  bool menu_wait_release = false;
 
   enum MenuItem {
     MI_RESUME = 0,
@@ -270,6 +274,7 @@ public:
 
   void close_menu() {
     menu_open = false;
+    menu_wait_release = true;
     if (machine) machine->debug_pause = false;
   }
 
@@ -412,9 +417,14 @@ public:
           if (sc == SDL_SCANCODE_PAUSE && down && !menu_open) { fast = !fast; break; }
           if (sc == SDL_SCANCODE_F4 && down && (e.key.keysym.mod & KMOD_ALT)) { quit = true; break; }
           // F9 toggles the debug menu (keyboard equivalent of controller Back).
-          if (sc == SDL_SCANCODE_F9 && down) {
+          if (sc == SDL_SCANCODE_F9 && down && !menu_wait_release) {
             if (menu_open) close_menu();
             else open_menu();
+            break;
+          }
+          if (menu_wait_release) {
+            // Swallow events until the closing key/button is up.
+            if (!down && !menu_controls_held()) menu_wait_release = false;
             break;
           }
           if (menu_open) {
@@ -468,7 +478,7 @@ public:
     run_script();
     // Joystick in port 2 from script, keyboard and game controller.
     bool up = false, down = false, left = false, right = false, fire = false;
-    if (!menu_open) {
+    if (!menu_open && !menu_wait_release) {
       up = sjoy[0] || kjoy[0];
       down = sjoy[1] || kjoy[1];
       left = sjoy[2] || kjoy[2];
@@ -476,11 +486,31 @@ public:
       fire = sjoy[4] || kjoy[4];
     }
     if (pad) poll_gamepad(up, down, left, right, fire);
-    else if (menu_open) {
-      // Keyboard-only menu navigation is handled in the key event path.
+    else if (menu_wait_release && !menu_controls_held()) {
+      menu_wait_release = false;
     }
-    if (!menu_open) machine->joy_state(up, down, left, right, fire);
-    else machine->joy_state(false, false, false, false, false);
+    if (!menu_open && !menu_wait_release)
+      machine->joy_state(up, down, left, right, fire);
+    else
+      machine->joy_state(false, false, false, false, false);
+  }
+
+  // True while any control that can open/close/activate the menu is held.
+  bool menu_controls_held() const {
+    if (pad) {
+      auto btn = [&](SDL_GameControllerButton b) {
+        return SDL_GameControllerGetButton(pad, b) != 0;
+      };
+      if (btn(SDL_CONTROLLER_BUTTON_BACK) || btn(SDL_CONTROLLER_BUTTON_A) ||
+          btn(SDL_CONTROLLER_BUTTON_B) || btn(SDL_CONTROLLER_BUTTON_X) ||
+          btn(SDL_CONTROLLER_BUTTON_Y) || btn(SDL_CONTROLLER_BUTTON_START))
+        return true;
+    }
+    const Uint8* ks = SDL_GetKeyboardState(nullptr);
+    if (ks[SDL_SCANCODE_F9] || ks[SDL_SCANCODE_ESCAPE] || ks[SDL_SCANCODE_RETURN] ||
+        ks[SDL_SCANCODE_SPACE] || ks[SDL_SCANCODE_Z] || ks[SDL_SCANCODE_X])
+      return true;
+    return false;
   }
 
   void poll_gamepad(bool& up, bool& down, bool& left, bool& right, bool& fire) {
@@ -489,6 +519,15 @@ public:
     int lx = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
     int ly = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
 
+    // After closing, wait until the closing control is released so the game
+    // does not see the same press (e.g. A as fire, Back as a second edge).
+    if (menu_wait_release) {
+      pad_back_held = btn(SDL_CONTROLLER_BUTTON_BACK);
+      if (!menu_controls_held()) menu_wait_release = false;
+      up = down = left = right = fire = false;
+      return;
+    }
+
     // Back button opens/closes the debug menu (edge-triggered).
     bool back = btn(SDL_CONTROLLER_BUTTON_BACK);
     if (back && !pad_back_held) {
@@ -496,6 +535,13 @@ public:
       else open_menu();
     }
     pad_back_held = back;
+
+    // close_menu() sets menu_wait_release; do not feed the still-held Back
+    // (or A on Resume) into the game on this same frame.
+    if (menu_wait_release) {
+      up = down = left = right = fire = false;
+      return;
+    }
 
     if (menu_open) {
       // Edge-triggered navigation while the menu is open.
