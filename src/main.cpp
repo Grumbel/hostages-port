@@ -101,6 +101,99 @@ int amiga_rawkey(SDL_Scancode sc) {
   }
 }
 
+
+// Tiny 5×7 bitmap font (ASCII 32–126). Each glyph is 5 columns packed into
+// 7 rows of bits (LSB = leftmost pixel). Used for the debug menu overlay.
+constexpr int FONT_W = 5, FONT_H = 7, FONT_ADV = 6;
+const uint8_t kFont[95][7] = {
+  // space .. /  (32-47)
+  {0,0,0,0,0,0,0},{0x04,0x04,0x04,0x04,0x00,0x04,0},{0x0A,0x0A,0x00,0,0,0,0},
+  {0x0A,0x1F,0x0A,0x1F,0x0A,0,0},{0x04,0x1E,0x05,0x0E,0x14,0x0F,0x04},
+  {0x19,0x19,0x02,0x04,0x08,0x13,0x13},{0x02,0x05,0x05,0x02,0x15,0x09,0x16},
+  {0x04,0x04,0,0,0,0,0},{0x04,0x02,0x01,0x01,0x01,0x02,0x04},
+  {0x04,0x08,0x10,0x10,0x10,0x08,0x04},{0x00,0x0A,0x04,0x1F,0x04,0x0A,0},
+  {0,0x04,0x04,0x1F,0x04,0x04,0},{0,0,0,0,0x04,0x04,0x02},
+  {0,0,0,0x1F,0,0,0},{0,0,0,0,0,0x04,0},{0x10,0x08,0x04,0x02,0x01,0,0},
+  // 0-9
+  {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},{0x04,0x06,0x04,0x04,0x04,0x04,0x0E},
+  {0x0E,0x11,0x10,0x0C,0x02,0x01,0x1F},{0x0E,0x11,0x10,0x0C,0x10,0x11,0x0E},
+  {0x08,0x0C,0x0A,0x09,0x1F,0x08,0x08},{0x1F,0x01,0x0F,0x10,0x10,0x11,0x0E},
+  {0x0C,0x02,0x01,0x0F,0x11,0x11,0x0E},{0x1F,0x10,0x08,0x04,0x02,0x02,0x02},
+  {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},{0x0E,0x11,0x11,0x1E,0x10,0x08,0x06},
+  // : ; < = > ? @
+  {0,0x04,0,0,0x04,0,0},{0,0x04,0,0,0x04,0x04,0x02},
+  {0x08,0x04,0x02,0x01,0x02,0x04,0x08},{0,0,0x1F,0,0x1F,0,0},
+  {0x02,0x04,0x08,0x10,0x08,0x04,0x02},{0x0E,0x11,0x10,0x08,0x04,0,0x04},
+  {0x0E,0x11,0x15,0x15,0x0D,0x01,0x1E},
+  // A-Z
+  {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x0F,0x11,0x11,0x0F,0x11,0x11,0x0F},
+  {0x0E,0x11,0x01,0x01,0x01,0x11,0x0E},{0x0F,0x11,0x11,0x11,0x11,0x11,0x0F},
+  {0x1F,0x01,0x01,0x0F,0x01,0x01,0x1F},{0x1F,0x01,0x01,0x0F,0x01,0x01,0x01},
+  {0x0E,0x11,0x01,0x1D,0x11,0x11,0x0E},{0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
+  {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},{0x10,0x10,0x10,0x10,0x10,0x11,0x0E},
+  {0x11,0x09,0x05,0x03,0x05,0x09,0x11},{0x01,0x01,0x01,0x01,0x01,0x01,0x1F},
+  {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},{0x11,0x13,0x15,0x19,0x11,0x11,0x11},
+  {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},{0x0F,0x11,0x11,0x0F,0x01,0x01,0x01},
+  {0x0E,0x11,0x11,0x11,0x15,0x09,0x16},{0x0F,0x11,0x11,0x0F,0x05,0x09,0x11},
+  {0x0E,0x11,0x01,0x0E,0x10,0x11,0x0E},{0x1F,0x04,0x04,0x04,0x04,0x04,0x04},
+  {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},{0x11,0x11,0x11,0x11,0x11,0x0A,0x04},
+  {0x11,0x11,0x11,0x15,0x15,0x1B,0x11},{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},
+  {0x11,0x11,0x0A,0x04,0x04,0x04,0x04},{0x1F,0x10,0x08,0x04,0x02,0x01,0x1F},
+  // [ \ ] ^ _ `
+  {0x07,0x01,0x01,0x01,0x01,0x01,0x07},{0x01,0x02,0x04,0x08,0x10,0,0},
+  {0x1C,0x10,0x10,0x10,0x10,0x10,0x1C},{0x04,0x0A,0x11,0,0,0,0},
+  {0,0,0,0,0,0,0x1F},{0x02,0x04,0,0,0,0,0},
+  // a-z (reuse uppercase shapes for the tiny font)
+  {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},{0x0F,0x11,0x11,0x0F,0x11,0x11,0x0F},
+  {0x0E,0x11,0x01,0x01,0x01,0x11,0x0E},{0x0F,0x11,0x11,0x11,0x11,0x11,0x0F},
+  {0x1F,0x01,0x01,0x0F,0x01,0x01,0x1F},{0x1F,0x01,0x01,0x0F,0x01,0x01,0x01},
+  {0x0E,0x11,0x01,0x1D,0x11,0x11,0x0E},{0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
+  {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},{0x10,0x10,0x10,0x10,0x10,0x11,0x0E},
+  {0x11,0x09,0x05,0x03,0x05,0x09,0x11},{0x01,0x01,0x01,0x01,0x01,0x01,0x1F},
+  {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},{0x11,0x13,0x15,0x19,0x11,0x11,0x11},
+  {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},{0x0F,0x11,0x11,0x0F,0x01,0x01,0x01},
+  {0x0E,0x11,0x11,0x11,0x15,0x09,0x16},{0x0F,0x11,0x11,0x0F,0x05,0x09,0x11},
+  {0x0E,0x11,0x01,0x0E,0x10,0x11,0x0E},{0x1F,0x04,0x04,0x04,0x04,0x04,0x04},
+  {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},{0x11,0x11,0x11,0x11,0x11,0x0A,0x04},
+  {0x11,0x11,0x11,0x15,0x15,0x1B,0x11},{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},
+  {0x11,0x11,0x0A,0x04,0x04,0x04,0x04},{0x1F,0x10,0x08,0x04,0x02,0x01,0x1F},
+  // { | } ~
+  {0x0C,0x02,0x02,0x01,0x02,0x02,0x0C},{0x04,0x04,0x04,0x04,0x04,0x04,0x04},
+  {0x06,0x08,0x08,0x10,0x08,0x08,0x06},{0x08,0x15,0x02,0,0,0,0},
+};
+
+void draw_char(uint32_t* fb, int stride, int x, int y, char ch, uint32_t color) {
+  if (ch < 32 || ch > 126) ch = '?';
+  const uint8_t* g = kFont[ch - 32];
+  for (int row = 0; row < FONT_H; ++row) {
+    uint8_t bits = g[row];
+    for (int col = 0; col < FONT_W; ++col)
+      if (bits & (1 << col)) {
+        int px = x + col, py = y + row;
+        if (px >= 0 && px < amiga::FB_W && py >= 0 && py < amiga::VIEW_H)
+          fb[py * stride + px] = color;
+      }
+  }
+}
+
+void draw_text(uint32_t* fb, int stride, int x, int y, const char* s, uint32_t color) {
+  for (; *s; ++s) {
+    draw_char(fb, stride, x, y, *s, color);
+    x += FONT_ADV;
+  }
+}
+
+void fill_rect(uint32_t* fb, int stride, int x, int y, int w, int h, uint32_t color) {
+  for (int row = 0; row < h; ++row) {
+    int py = y + row;
+    if (py < 0 || py >= amiga::VIEW_H) continue;
+    for (int col = 0; col < w; ++col) {
+      int px = x + col;
+      if (px >= 0 && px < amiga::FB_W) fb[py * stride + px] = color;
+    }
+  }
+}
+
 class SdlHost : public amiga::Host {
 public:
   SDL_Window* win = nullptr;
@@ -123,6 +216,149 @@ public:
   bool sjoy[5] = {};  // scripted joystick
   bool kjoy[5] = {};  // keyboard joystick
   bool pad_held_key[128] = {};
+
+  // Debug menu (opened with controller Back or F9).
+  bool menu_open = false;
+  int menu_sel = 0;
+  int save_slot = 1;  // 1..5
+  std::string save_dir;
+  std::string status_msg;
+  int status_until = 0;  // frame_no when status_msg clears
+  bool pad_back_held = false;
+  bool pad_menu_nav[6] = {};  // up down left right a b edge track
+
+  enum MenuItem {
+    MI_RESUME = 0,
+    MI_SAVE,
+    MI_LOAD,
+    MI_SLOT,
+    MI_COMPLETE_S1,
+    MI_SOFT_RESET,
+    MI_SCREENSHOT,
+    MI_FAST,
+    MI_COUNT
+  };
+
+  static const char* menu_label(int i, int slot, bool fast_on) {
+    switch (i) {
+      case MI_RESUME: return "Resume";
+      case MI_SAVE: return "Save state";
+      case MI_LOAD: return "Load state";
+      case MI_SLOT: return nullptr;  // formatted
+      case MI_COMPLETE_S1: return "Complete stage I";
+      case MI_SOFT_RESET: return "Soft reset";
+      case MI_SCREENSHOT: return "Screenshot";
+      case MI_FAST: return fast_on ? "Fast forward: ON" : "Fast forward: OFF";
+      default: return "?";
+    }
+  }
+
+  std::string slot_path(int slot) const {
+    return save_dir + "/states/slot" + std::to_string(slot) + ".sav";
+  }
+
+  void set_status(const std::string& s) {
+    status_msg = s;
+    status_until = frame_no + 90;
+  }
+
+  void open_menu() {
+    menu_open = true;
+    menu_sel = 0;
+    if (machine) machine->debug_pause = true;
+  }
+
+  void close_menu() {
+    menu_open = false;
+    if (machine) machine->debug_pause = false;
+  }
+
+  void activate_menu() {
+    if (!machine) return;
+    switch (menu_sel) {
+      case MI_RESUME:
+        close_menu();
+        break;
+      case MI_SAVE: {
+        std::filesystem::create_directories(save_dir + "/states");
+        std::string p = slot_path(save_slot);
+        if (machine->save_state(p)) set_status("Saved slot " + std::to_string(save_slot));
+        else set_status("Save failed");
+        break;
+      }
+      case MI_LOAD: {
+        std::string p = slot_path(save_slot);
+        if (machine->load_state(p)) {
+          set_status("Loaded slot " + std::to_string(save_slot));
+          // frame counter on the host is independent; keep going
+        } else set_status("Load failed");
+        break;
+      }
+      case MI_SLOT:
+        save_slot = save_slot % 5 + 1;
+        break;
+      case MI_COMPLETE_S1:
+        machine->complete_stage1();
+        set_status("Stage I marked complete");
+        break;
+      case MI_SOFT_RESET:
+        if (machine->soft_reset()) set_status("Soft reset");
+        else set_status("Reset failed");
+        close_menu();
+        break;
+      case MI_SCREENSHOT: {
+        pending_shot = "debug_shot.ppm";
+        set_status("Screenshot queued");
+        break;
+      }
+      case MI_FAST:
+        fast = !fast;
+        break;
+      default: break;
+    }
+  }
+
+  void draw_menu_overlay(uint32_t* fb) {
+    // Dim the background.
+    for (int i = 0; i < amiga::FB_W * amiga::VIEW_H; ++i) {
+      uint32_t c = fb[i];
+      uint32_t r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      fb[i] = 0xFF000000u | ((r / 3) << 16) | ((g / 3) << 8) | (b / 3);
+    }
+    constexpr int box_x = 40, box_y = 28, box_w = 240, box_h = 150;
+    fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
+    fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40A0FF);
+    fill_rect(fb, amiga::FB_W, box_x, box_y + box_h - 1, box_w, 1, 0xFF40A0FF);
+    fill_rect(fb, amiga::FB_W, box_x, box_y, 1, box_h, 0xFF40A0FF);
+    fill_rect(fb, amiga::FB_W, box_x + box_w - 1, box_y, 1, box_h, 0xFF40A0FF);
+
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + 6, "DEBUG MENU", 0xFF40A0FF);
+    char info[64];
+    std::snprintf(info, sizeof(info), "frame %d  %s", frame_no,
+                  machine && !machine->program_name().empty()
+                      ? machine->program_name().c_str()
+                      : "-");
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + 16, info, 0xFF808890);
+
+    for (int i = 0; i < MI_COUNT; ++i) {
+      int y = box_y + 30 + i * 12;
+      uint32_t col = (i == menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
+      if (i == menu_sel)
+        fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
+      char line[64];
+      if (i == MI_SLOT)
+        std::snprintf(line, sizeof(line), "Slot: %d", save_slot);
+      else
+        std::snprintf(line, sizeof(line), "%s", menu_label(i, save_slot, fast));
+      draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
+    }
+
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 14,
+              "Up/Down  A/Return  Back", 0xFF607080);
+    if (!status_msg.empty() && frame_no < status_until)
+      draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 24, status_msg.c_str(),
+                0xFF80FF80);
+  }
 
   bool init(int scale) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -173,8 +409,32 @@ public:
             SDL_SetWindowFullscreen(win, fl ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             break;
           }
-          if (sc == SDL_SCANCODE_PAUSE && down) { fast = !fast; break; }
+          if (sc == SDL_SCANCODE_PAUSE && down && !menu_open) { fast = !fast; break; }
           if (sc == SDL_SCANCODE_F4 && down && (e.key.keysym.mod & KMOD_ALT)) { quit = true; break; }
+          // F9 toggles the debug menu (keyboard equivalent of controller Back).
+          if (sc == SDL_SCANCODE_F9 && down) {
+            if (menu_open) close_menu();
+            else open_menu();
+            break;
+          }
+          if (menu_open) {
+            if (!down || e.key.repeat) break;
+            if (sc == SDL_SCANCODE_UP || sc == SDL_SCANCODE_W) {
+              menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
+            } else if (sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_S) {
+              menu_sel = (menu_sel + 1) % MI_COUNT;
+            } else if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_A) {
+              if (menu_sel == MI_SLOT) save_slot = save_slot <= 1 ? 5 : save_slot - 1;
+            } else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_D) {
+              if (menu_sel == MI_SLOT) save_slot = save_slot % 5 + 1;
+            } else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE ||
+                       sc == SDL_SCANCODE_Z || sc == SDL_SCANCODE_X) {
+              activate_menu();
+            } else if (sc == SDL_SCANCODE_ESCAPE) {
+              close_menu();
+            }
+            break;
+          }
           if (e.key.repeat) break;
           int rk = amiga_rawkey(sc);
           if (rk >= 0) machine->key_event(uint8_t(rk), down);
@@ -207,10 +467,20 @@ public:
     }
     run_script();
     // Joystick in port 2 from script, keyboard and game controller.
-    bool up = sjoy[0] || kjoy[0], down = sjoy[1] || kjoy[1], left = sjoy[2] || kjoy[2];
-    bool right = sjoy[3] || kjoy[3], fire = sjoy[4] || kjoy[4];
+    bool up = false, down = false, left = false, right = false, fire = false;
+    if (!menu_open) {
+      up = sjoy[0] || kjoy[0];
+      down = sjoy[1] || kjoy[1];
+      left = sjoy[2] || kjoy[2];
+      right = sjoy[3] || kjoy[3];
+      fire = sjoy[4] || kjoy[4];
+    }
     if (pad) poll_gamepad(up, down, left, right, fire);
-    machine->joy_state(up, down, left, right, fire);
+    else if (menu_open) {
+      // Keyboard-only menu navigation is handled in the key event path.
+    }
+    if (!menu_open) machine->joy_state(up, down, left, right, fire);
+    else machine->joy_state(false, false, false, false, false);
   }
 
   void poll_gamepad(bool& up, bool& down, bool& left, bool& right, bool& fire) {
@@ -218,18 +488,49 @@ public:
     constexpr int dead = 12000;
     int lx = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
     int ly = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+
+    // Back button opens/closes the debug menu (edge-triggered).
+    bool back = btn(SDL_CONTROLLER_BUTTON_BACK);
+    if (back && !pad_back_held) {
+      if (menu_open) close_menu();
+      else open_menu();
+    }
+    pad_back_held = back;
+
+    if (menu_open) {
+      // Edge-triggered navigation while the menu is open.
+      bool nav[5] = {
+          ly < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_UP),
+          ly > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN),
+          lx < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT),
+          lx > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT),
+          btn(SDL_CONTROLLER_BUTTON_A) || btn(SDL_CONTROLLER_BUTTON_X),
+      };
+      if (nav[0] && !pad_menu_nav[0]) menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
+      if (nav[1] && !pad_menu_nav[1]) menu_sel = (menu_sel + 1) % MI_COUNT;
+      if (nav[2] && !pad_menu_nav[2] && menu_sel == MI_SLOT)
+        save_slot = save_slot <= 1 ? 5 : save_slot - 1;
+      if (nav[3] && !pad_menu_nav[3] && menu_sel == MI_SLOT)
+        save_slot = save_slot % 5 + 1;
+      if (nav[4] && !pad_menu_nav[4]) activate_menu();
+      for (int i = 0; i < 5; ++i) pad_menu_nav[i] = nav[i];
+      // Do not feed joystick/keys to the game while the menu is open.
+      up = down = left = right = fire = false;
+      return;
+    }
+
     up |= ly < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_UP);
     down |= ly > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN);
     left |= lx < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT);
     right |= lx > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
     fire |= btn(SDL_CONTROLLER_BUTTON_A);
     // Other buttons send keys (held while the button is held).
+    // Back is reserved for the debug menu (above).
     static const struct { SDL_GameControllerButton b; int key; } map[] = {
         {SDL_CONTROLLER_BUTTON_B, 0x40},       // Space
         {SDL_CONTROLLER_BUTTON_X, 0x44},       // Return
         {SDL_CONTROLLER_BUTTON_Y, 0x41},       // Backspace
         {SDL_CONTROLLER_BUTTON_START, 0x59},   // F10
-        {SDL_CONTROLLER_BUTTON_BACK, 0x45},    // Esc
         {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x50},   // F1
         {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x51},  // F2
     };
@@ -244,7 +545,13 @@ public:
 
   void frame(const uint32_t* fb) override {
     ++frame_no;
-    SDL_UpdateTexture(tex, nullptr, fb, amiga::FB_W * 4);
+    // Copy into a mutable buffer so the debug menu can composite an overlay.
+    static std::vector<uint32_t> overlay;
+    overlay.assign(fb, fb + amiga::FB_W * amiga::VIEW_H);
+    if (menu_open) draw_menu_overlay(overlay.data());
+    else if (!status_msg.empty() && frame_no < status_until)
+      draw_text(overlay.data(), amiga::FB_W, 4, 4, status_msg.c_str(), 0xFF80FF80);
+    SDL_UpdateTexture(tex, nullptr, overlay.data(), amiga::FB_W * 4);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
     SDL_RenderCopy(ren, tex, nullptr, nullptr);
@@ -469,6 +776,7 @@ int main(int argc, char** argv) {
 
   SdlHost host;
   host.machine = &machine;
+  host.save_dir = save_dir;
   host.screenshot_frame = shot_frame;
   host.screenshot_path = shot_path;
   host.quit_after = quit_after;

@@ -28,7 +28,7 @@ Machine::Machine()
 
 Machine::~Machine() = default;
 
-void Machine::log(const char* fmt, ...) {
+void Machine::log(const char* fmt, ...) const {
   va_list ap;
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
@@ -112,6 +112,8 @@ uint32_t Machine::avail(bool chip, bool largest, bool fast) const {
 // ---- boot ------------------------------------------------------------------
 
 bool Machine::boot(const std::string& adf_path, const std::string& save_path) {
+  adf_path_ = adf_path;
+  disk_save_path_ = save_path;
   if (!disk.load(adf_path, save_path)) return false;
   const auto& img = disk.image();
   if (std::memcmp(img.data(), "DOS", 3) != 0) {
@@ -153,6 +155,7 @@ const Patch patches[] = {
 
 void Machine::program_loaded(const std::string& name, const std::vector<uint32_t>& addrs,
                              const std::vector<uint32_t>& sizes) {
+  program_name_ = name;
   if (addrs.size() > 1) program_a4_ = addrs[1] + 0x7FFE;
   if (verbose) {
     log("[program] %s:", name.c_str());
@@ -373,6 +376,16 @@ void Machine::execute(int64_t until) {
 int Machine::run() {
   try {
     for (;;) {
+      if (debug_pause) {
+        // Present the last frame so the host can draw its overlay; do not
+        // advance the CPU or chipset.
+        if (host_) {
+          host_->frame(view_.data());
+          host_->audio(audio_buf_.data(), audio_buf_.size() / 2);
+        }
+        audio_buf_.clear();
+        continue;
+      }
       execute(line_start_ + line_cycles_);
       if (cpu.cycles >= line_start_ + line_cycles_) run_line();
     }
@@ -381,6 +394,261 @@ int Machine::run() {
   disk.flush();
   write_coverage();
   return 0;
+}
+
+
+bool Machine::soft_reset() {
+  if (adf_path_.empty()) return false;
+  // Rebuild HLE and clear transient state; keep host, flags and paths.
+  Host* h = host_;
+  hle_ = std::make_unique<Hle>(*this);
+  free_list_.clear();
+  key_queue_.clear();
+  key_hold_lines_ = 0;
+  program_a4_ = 0;
+  program_name_.clear();
+  frame_count_ = 0;
+  vpos_ = 0;
+  line_start_ = 0;
+  cia_sync_ = 0;
+  eclk_frac_ = 0;
+  call_depth_ = 0;
+  last_call_z_ = false;
+  first_bpl_line_ = -1;
+  view_top_ = 0;
+  audio_buf_.clear();
+  audio_frac_ = 0;
+  lp_l_ = lp_r_ = 0;
+  mouse_x_ = mouse_y_ = 0;
+  lmb_ = rmb_ = false;
+  joy_up_ = joy_down_ = joy_left_ = joy_right_ = joy_fire_ = false;
+  cyl_ = side_ = 0;
+  motor_ = false;
+  std::memset(&cs_, 0, sizeof(cs_));
+  // Custom defaults that boot/rendering assume.
+  cs_.diwstrt_ = 0x2C81;
+  cs_.diwstop_ = 0x2CC1;
+  cs_.ddfstrt_ = 0x38;
+  cs_.ddfstop_ = 0xD0;
+  cs_.bltafwm_ = 0xFFFF;
+  cs_.bltalwm_ = 0xFFFF;
+  cs_.dsksync_ = 0x4489;
+  cia_[0] = Cia{};
+  cia_[1] = Cia{};
+  cpu = m68k::Cpu{};
+  cpu.bus = this;
+  cpu.line_a = [this](m68k::Cpu&, uint16_t op) { return line_a(op); };
+  cpu.fatal = [this](m68k::Cpu& c, int vec) {
+    log("FATAL: exception vector %d at pc=%06x (op_pc=%06x)\n", vec, c.pc, c.op_pc);
+    for (int i = 0; i < 8; ++i) log("  d%d=%08x a%d=%08x\n", i, c.d[i], i, c.a[i]);
+    throw QuitRequested{};
+  };
+  std::fill(chip_.begin(), chip_.end(), 0);
+  std::fill(slow_.begin(), slow_.end(), 0);
+  std::fill(fb_.begin(), fb_.end(), 0);
+  std::fill(view_.begin(), view_.end(), 0);
+  if (!coverage_path.empty()) executed_.assign(CHIP_SIZE, 0);
+  else executed_.clear();
+  host_ = h;
+  debug_pause = false;
+  return boot(adf_path_, disk_save_path_);
+}
+
+void Machine::complete_stage1() {
+  if (program_a4_ == 0) {
+    log("complete_stage1: no program loaded\n");
+    return;
+  }
+  // Trackloader "Hostage": target words at -206(a4), 14 bytes apart.
+  // AmigaDOS "Hostages": first slot of each 3-slot row at -7600(a4), 14 apart.
+  const int base = disk.is_dos() ? -7600 : -206;
+  for (int i = 0; i < 3; ++i) {
+    uint32_t a = program_a4_ + uint32_t(base + i * 14);
+    write16(a, uint16_t(i + 1));
+  }
+  log("complete_stage1: marksmen at targets (%s offsets)\n",
+      disk.is_dos() ? "Hostages" : "Hostage");
+}
+
+bool Machine::save_state(const std::string& path) const {
+  FILE* f = fopen(path.c_str(), "wb");
+  if (!f) {
+    log("save_state: cannot write %s\n", path.c_str());
+    return false;
+  }
+  auto fail = [&]() { fclose(f); return false; };
+  const char magic[8] = {'H', 'O', 'S', 'T', 'S', 'A', 'V', '1'};
+  if (fwrite(magic, 1, 8, f) != 8) return fail();
+
+  // CPU register state + cycles
+  auto regs = cpu.save();
+  if (fwrite(&regs, 1, sizeof(regs), f) != sizeof(regs)) return fail();
+  if (fwrite(&cpu.cycles, 1, sizeof(cpu.cycles), f) != sizeof(cpu.cycles)) return fail();
+  if (fwrite(&cpu.op_pc, 1, sizeof(cpu.op_pc), f) != sizeof(cpu.op_pc)) return fail();
+
+  // RAM
+  if (fwrite(chip_.data(), 1, chip_.size(), f) != chip_.size()) return fail();
+  if (fwrite(slow_.data(), 1, slow_.size(), f) != slow_.size()) return fail();
+
+  // Custom chips + CIAs
+  if (fwrite(&cs_, 1, sizeof(cs_), f) != sizeof(cs_)) return fail();
+  if (fwrite(&cia_[0], 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+  if (fwrite(&cia_[1], 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+
+  // Timing / display / input
+  auto wr_i64 = [&](int64_t v) { return fwrite(&v, 1, 8, f) == 8; };
+  auto wr_u64 = [&](uint64_t v) { return fwrite(&v, 1, 8, f) == 8; };
+  auto wr_u32 = [&](uint32_t v) { return fwrite(&v, 1, 4, f) == 4; };
+  auto wr_i32 = [&](int32_t v) { return fwrite(&v, 1, 4, f) == 4; };
+  auto wr_str = [&](const std::string& s) {
+    if (!wr_u32(uint32_t(s.size()))) return false;
+    return s.empty() || fwrite(s.data(), 1, s.size(), f) == s.size();
+  };
+  if (!wr_i64(line_start_) || !wr_i64(line_cycles_) || !wr_i64(cia_sync_)) return fail();
+  double eclk = eclk_frac_;
+  if (fwrite(&eclk, 1, sizeof(eclk), f) != sizeof(eclk)) return fail();
+  if (!wr_i32(int32_t(vpos_)) || !wr_u64(frame_count_) || !wr_i32(int32_t(call_depth_))) return fail();
+  uint8_t z = last_call_z_ ? 1 : 0;
+  if (fwrite(&z, 1, 1, f) != 1) return fail();
+  if (!wr_i32(int32_t(first_bpl_line_)) || !wr_i32(int32_t(view_top_))) return fail();
+  if (!wr_i32(int32_t(cyl_)) || !wr_i32(int32_t(side_))) return fail();
+  uint8_t motor = motor_ ? 1 : 0;
+  if (fwrite(&motor, 1, 1, f) != 1) return fail();
+  if (!wr_i32(int32_t(mouse_x_)) || !wr_i32(int32_t(mouse_y_))) return fail();
+  uint8_t buttons = (lmb_ ? 1 : 0) | (rmb_ ? 2 : 0);
+  if (fwrite(&buttons, 1, 1, f) != 1) return fail();
+  uint8_t joy = (joy_up_ ? 1 : 0) | (joy_down_ ? 2 : 0) | (joy_left_ ? 4 : 0) |
+                (joy_right_ ? 8 : 0) | (joy_fire_ ? 16 : 0);
+  if (fwrite(&joy, 1, 1, f) != 1) return fail();
+  if (!wr_i32(int32_t(key_hold_lines_))) return fail();
+  if (!wr_u32(uint32_t(key_queue_.size()))) return fail();
+  for (uint8_t k : key_queue_)
+    if (fwrite(&k, 1, 1, f) != 1) return fail();
+  if (!wr_u32(program_a4_) || !wr_str(program_name_)) return fail();
+
+  // free list
+  if (!wr_u32(uint32_t(free_list_.size()))) return fail();
+  for (const auto& [a, s] : free_list_)
+    if (!wr_u32(a) || !wr_u32(s)) return fail();
+
+  // disk + HLE
+  if (!disk.save_state(f)) return fail();
+  if (!hle_->save_state(f)) return fail();
+
+  fclose(f);
+  log("save_state: wrote %s (frame %llu)\n", path.c_str(),
+      (unsigned long long)frame_count_);
+  return true;
+}
+
+bool Machine::load_state(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f) {
+    log("load_state: cannot read %s\n", path.c_str());
+    return false;
+  }
+  auto fail = [&]() { fclose(f); return false; };
+  char magic[8] = {};
+  if (fread(magic, 1, 8, f) != 8 || std::memcmp(magic, "HOSTSAV1", 8) != 0) {
+    log("load_state: bad magic in %s\n", path.c_str());
+    return fail();
+  }
+
+  m68k::Cpu::Regs regs{};
+  if (fread(&regs, 1, sizeof(regs), f) != sizeof(regs)) return fail();
+  int64_t cycles = 0;
+  uint32_t op_pc = 0;
+  if (fread(&cycles, 1, sizeof(cycles), f) != sizeof(cycles)) return fail();
+  if (fread(&op_pc, 1, sizeof(op_pc), f) != sizeof(op_pc)) return fail();
+
+  if (fread(chip_.data(), 1, chip_.size(), f) != chip_.size()) return fail();
+  if (fread(slow_.data(), 1, slow_.size(), f) != slow_.size()) return fail();
+  if (fread(&cs_, 1, sizeof(cs_), f) != sizeof(cs_)) return fail();
+  if (fread(&cia_[0], 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+  if (fread(&cia_[1], 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+
+  auto rd_i64 = [&](int64_t& v) { return fread(&v, 1, 8, f) == 8; };
+  auto rd_u64 = [&](uint64_t& v) { return fread(&v, 1, 8, f) == 8; };
+  auto rd_u32 = [&](uint32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_i32 = [&](int32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_str = [&](std::string& s) {
+    uint32_t n = 0;
+    if (!rd_u32(n) || n > 1024) return false;
+    s.resize(n);
+    return n == 0 || fread(s.data(), 1, n, f) == n;
+  };
+  if (!rd_i64(line_start_) || !rd_i64(line_cycles_) || !rd_i64(cia_sync_)) return fail();
+  if (fread(&eclk_frac_, 1, sizeof(eclk_frac_), f) != sizeof(eclk_frac_)) return fail();
+  int32_t vpos = 0, call_depth = 0, first_bpl = 0, view_top = 0, cyl = 0, side = 0;
+  int32_t mx = 0, my = 0, kh = 0;
+  if (!rd_i32(vpos) || !rd_u64(frame_count_) || !rd_i32(call_depth)) return fail();
+  uint8_t z = 0;
+  if (fread(&z, 1, 1, f) != 1) return fail();
+  last_call_z_ = z != 0;
+  if (!rd_i32(first_bpl) || !rd_i32(view_top)) return fail();
+  if (!rd_i32(cyl) || !rd_i32(side)) return fail();
+  uint8_t motor = 0;
+  if (fread(&motor, 1, 1, f) != 1) return fail();
+  if (!rd_i32(mx) || !rd_i32(my)) return fail();
+  uint8_t buttons = 0, joy = 0;
+  if (fread(&buttons, 1, 1, f) != 1 || fread(&joy, 1, 1, f) != 1) return fail();
+  if (!rd_i32(kh)) return fail();
+  uint32_t nkeys = 0;
+  if (!rd_u32(nkeys) || nkeys > 256) return fail();
+  key_queue_.clear();
+  for (uint32_t i = 0; i < nkeys; ++i) {
+    uint8_t k = 0;
+    if (fread(&k, 1, 1, f) != 1) return fail();
+    key_queue_.push_back(k);
+  }
+  if (!rd_u32(program_a4_) || !rd_str(program_name_)) return fail();
+
+  uint32_t nfree = 0;
+  if (!rd_u32(nfree) || nfree > 100000) return fail();
+  free_list_.clear();
+  for (uint32_t i = 0; i < nfree; ++i) {
+    uint32_t a = 0, s = 0;
+    if (!rd_u32(a) || !rd_u32(s)) return fail();
+    free_list_[a] = s;
+  }
+
+  if (!disk.load_state(f)) return fail();
+  if (!hle_->load_state(f)) return fail();
+  fclose(f);
+
+  vpos_ = vpos;
+  call_depth_ = call_depth;
+  first_bpl_line_ = first_bpl;
+  view_top_ = view_top;
+  cyl_ = cyl;
+  side_ = side;
+  motor_ = motor != 0;
+  mouse_x_ = mx;
+  mouse_y_ = my;
+  lmb_ = buttons & 1;
+  rmb_ = buttons & 2;
+  joy_up_ = joy & 1;
+  joy_down_ = joy & 2;
+  joy_left_ = joy & 4;
+  joy_right_ = joy & 8;
+  joy_fire_ = joy & 16;
+  key_hold_lines_ = kh;
+
+  // Restore CPU without dropping the bus / handlers.
+  cpu.restore(regs);
+  cpu.cycles = cycles;
+  cpu.op_pc = op_pc;
+  cpu.bus = this;
+  // Re-render so the host shows the restored frame immediately.
+  render_frame();
+  if (first_bpl_line_ >= 0)
+    view_top_ = std::clamp(first_bpl_line_ - FB_VSTART, 0, FB_H - VIEW_H);
+  std::copy(fb_.begin() + long(view_top_) * FB_W, fb_.begin() + long(view_top_ + VIEW_H) * FB_W,
+            view_.begin());
+
+  log("load_state: loaded %s (frame %llu, program %s)\n", path.c_str(),
+      (unsigned long long)frame_count_, program_name_.c_str());
+  return true;
 }
 
 }  // namespace amiga

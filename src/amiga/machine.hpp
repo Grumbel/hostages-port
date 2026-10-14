@@ -164,10 +164,28 @@ public:
   // Small-data base (a4) of the program started last: its data hunk + $7FFE
   // (both programs are compiled with the small data model).
   uint32_t program_a4() const { return program_a4_; }
+  // Name of the program started last ("apro1.", "it.", …); empty before any load.
+  const std::string& program_name() const { return program_name_; }
   // Bypass the manual word check (on by default, --protection keeps it).
   bool bypass_protection = true;
   // Accept any rank access code (Captain/Commander) without knowing it.
   bool skip_access_codes = false;
+
+  // ---- debug / save states ----------------------------------------------
+  // When true the scheduler still presents frames but does not advance the
+  // CPU (used by the host debug menu).
+  bool debug_pause = false;
+  // Snapshot the whole machine (RAM, CPU, chips, CIAs, disk, HLE) to path.
+  bool save_state(const std::string& path) const;
+  bool load_state(const std::string& path);
+  // Soft-reset: re-run boot() with the same ADF/save paths.
+  bool soft_reset();
+  // Force stage-I marksmen into target positions so Return advances to part II
+  // (offsets differ between the trackloader and AmigaDOS releases).
+  void complete_stage1();
+  // Paths remembered from the last successful boot() (for soft_reset).
+  const std::string& adf_path() const { return adf_path_; }
+  const std::string& disk_save_path() const { return disk_save_path_; }
 
   // Coverage: record executed instruction addresses (chip RAM).
   std::string coverage_path;
@@ -176,7 +194,7 @@ public:
   int ram_hash_every = 0;       // log a hash of chip RAM every N frames
   uint64_t frame_count() const { return frame_count_; }
 
-  void log(const char* fmt, ...);
+  void log(const char* fmt, ...) const;
 
 private:
   friend struct Hle;
@@ -295,6 +313,9 @@ private:
 
   std::vector<uint8_t> executed_;
   uint32_t program_a4_ = 0;
+  std::string program_name_;
+  std::string adf_path_;
+  std::string disk_save_path_;
   uint32_t watch_pc_addr_ = 0;
   uint8_t watch_pc_val_ = 0;
   int watch_pc_budget_ = 40;

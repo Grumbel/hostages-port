@@ -1531,4 +1531,159 @@ void Hle::gfx(int lvo) {
   }
 }
 
+
+bool Hle::save_state(FILE* f) const {
+  auto wr_u32 = [&](uint32_t v) { return fwrite(&v, 1, 4, f) == 4; };
+  auto wr_u64 = [&](uint64_t v) { return fwrite(&v, 1, 8, f) == 8; };
+  auto wr_i32 = [&](int32_t v) { return fwrite(&v, 1, 4, f) == 4; };
+  auto wr_str = [&](const std::string& s) {
+    if (!wr_u32(uint32_t(s.size()))) return false;
+    return s.empty() || fwrite(s.data(), 1, s.size(), f) == s.size();
+  };
+  auto wr_bytes = [&](const std::vector<uint8_t>& v) {
+    if (!wr_u32(uint32_t(v.size()))) return false;
+    return v.empty() || fwrite(v.data(), 1, v.size(), f) == v.size();
+  };
+
+  if (!wr_u32(ret_stub) || !wr_u32(heap_start) || !wr_u32(stage2_)) return false;
+  if (!wr_u32(uint32_t(script_.size()))) return false;
+  for (const auto& s : script_)
+    if (!wr_str(s)) return false;
+  if (!wr_u32(uint32_t(script_pos_)) || !wr_u32(stack_size_) || !wr_u32(seglist_) || !wr_u32(cli_))
+    return false;
+
+  if (!wr_u32(uint32_t(screens_.size()))) return false;
+  for (const auto& s : screens_) {
+    if (!wr_u32(s.addr) || !wr_u32(s.copper) || !wr_u32(s.colors)) return false;
+    uint8_t ob = s.own_bitmap ? 1 : 0;
+    if (fwrite(&ob, 1, 1, f) != 1) return false;
+  }
+  if (!wr_u32(view_) || !wr_u32(cprlist_) || !wr_u32(copinit_) || !wr_u32(blank_sprite_)) return false;
+
+  if (!wr_u32(uint32_t(files_.size()))) return false;
+  for (const auto& [k, file] : files_) {
+    if (!wr_u32(k) || !wr_bytes(file.data) || !wr_u32(file.pos)) return false;
+    uint8_t w = file.write ? 1 : 0;
+    if (fwrite(&w, 1, 1, f) != 1) return false;
+    if (!wr_str(file.name)) return false;
+  }
+  if (!wr_u32(uint32_t(locks_.size()))) return false;
+  for (const auto& [k, v] : locks_)
+    if (!wr_u32(k) || !wr_i32(int32_t(v))) return false;
+  if (!wr_u32(uint32_t(exnext_.size()))) return false;
+  for (const auto& [k, v] : exnext_)
+    if (!wr_u32(k) || !wr_i32(int32_t(v))) return false;
+  if (!wr_u32(ioerr_) || !wr_u32(current_dir_)) return false;
+  if (!wr_u64(delay_until_) || !wr_u64(wait_frame_)) return false;
+
+  if (!wr_u32(low_next_)) return false;
+  for (int i = 0; i < LIB_COUNT; ++i)
+    if (!wr_u32(libs_[i])) return false;
+  if (!wr_u32(task_) || !wr_u32(td_unit_) || !wr_u32(port_list_) || !wr_u32(lib_list_)) return false;
+  if (!wr_u32(mem_headers_[0]) || !wr_u32(mem_headers_[1])) return false;
+  if (!wr_u32(sig_alloc_) || !wr_u32(sig_recvd_) || !wr_u32(trap_alloc_)) return false;
+  if (!wr_i32(int32_t(id_nest_))) return false;
+  for (int i = 0; i < 16; ++i) {
+    if (!wr_u32(uint32_t(servers_[i].size()))) return false;
+    for (uint32_t s : servers_[i])
+      if (!wr_u32(s)) return false;
+  }
+  for (int i = 0; i < 16; ++i)
+    if (!wr_u32(vectors_[i])) return false;
+  return true;
+}
+
+bool Hle::load_state(FILE* f) {
+  auto rd_u32 = [&](uint32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_u64 = [&](uint64_t& v) { return fread(&v, 1, 8, f) == 8; };
+  auto rd_i32 = [&](int32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_str = [&](std::string& s) {
+    uint32_t n = 0;
+    if (!rd_u32(n) || n > 16 * 1024 * 1024) return false;
+    s.resize(n);
+    return n == 0 || fread(s.data(), 1, n, f) == n;
+  };
+  auto rd_bytes = [&](std::vector<uint8_t>& v) {
+    uint32_t n = 0;
+    if (!rd_u32(n) || n > 64 * 1024 * 1024) return false;
+    v.resize(n);
+    return n == 0 || fread(v.data(), 1, n, f) == n;
+  };
+
+  if (!rd_u32(ret_stub) || !rd_u32(heap_start) || !rd_u32(stage2_)) return false;
+  uint32_t nscript = 0;
+  if (!rd_u32(nscript) || nscript > 256) return false;
+  script_.resize(nscript);
+  for (auto& s : script_)
+    if (!rd_str(s)) return false;
+  uint32_t spos = 0;
+  if (!rd_u32(spos) || !rd_u32(stack_size_) || !rd_u32(seglist_) || !rd_u32(cli_)) return false;
+  script_pos_ = spos;
+
+  uint32_t nscreens = 0;
+  if (!rd_u32(nscreens) || nscreens > 16) return false;
+  screens_.resize(nscreens);
+  for (auto& s : screens_) {
+    if (!rd_u32(s.addr) || !rd_u32(s.copper) || !rd_u32(s.colors)) return false;
+    uint8_t ob = 0;
+    if (fread(&ob, 1, 1, f) != 1) return false;
+    s.own_bitmap = ob != 0;
+  }
+  if (!rd_u32(view_) || !rd_u32(cprlist_) || !rd_u32(copinit_) || !rd_u32(blank_sprite_)) return false;
+
+  uint32_t nfiles = 0;
+  if (!rd_u32(nfiles) || nfiles > 256) return false;
+  files_.clear();
+  for (uint32_t i = 0; i < nfiles; ++i) {
+    uint32_t k = 0;
+    DosFile file;
+    if (!rd_u32(k) || !rd_bytes(file.data) || !rd_u32(file.pos)) return false;
+    uint8_t w = 0;
+    if (fread(&w, 1, 1, f) != 1) return false;
+    file.write = w != 0;
+    if (!rd_str(file.name)) return false;
+    files_[k] = std::move(file);
+  }
+  uint32_t nlocks = 0;
+  if (!rd_u32(nlocks) || nlocks > 256) return false;
+  locks_.clear();
+  for (uint32_t i = 0; i < nlocks; ++i) {
+    uint32_t k = 0;
+    int32_t v = 0;
+    if (!rd_u32(k) || !rd_i32(v)) return false;
+    locks_[k] = int(v);
+  }
+  uint32_t nex = 0;
+  if (!rd_u32(nex) || nex > 256) return false;
+  exnext_.clear();
+  for (uint32_t i = 0; i < nex; ++i) {
+    uint32_t k = 0;
+    int32_t v = 0;
+    if (!rd_u32(k) || !rd_i32(v)) return false;
+    exnext_[k] = int(v);
+  }
+  if (!rd_u32(ioerr_) || !rd_u32(current_dir_)) return false;
+  if (!rd_u64(delay_until_) || !rd_u64(wait_frame_)) return false;
+
+  if (!rd_u32(low_next_)) return false;
+  for (int i = 0; i < LIB_COUNT; ++i)
+    if (!rd_u32(libs_[i])) return false;
+  if (!rd_u32(task_) || !rd_u32(td_unit_) || !rd_u32(port_list_) || !rd_u32(lib_list_)) return false;
+  if (!rd_u32(mem_headers_[0]) || !rd_u32(mem_headers_[1])) return false;
+  if (!rd_u32(sig_alloc_) || !rd_u32(sig_recvd_) || !rd_u32(trap_alloc_)) return false;
+  int32_t idn = 0;
+  if (!rd_i32(idn)) return false;
+  id_nest_ = int(idn);
+  for (int i = 0; i < 16; ++i) {
+    uint32_t n = 0;
+    if (!rd_u32(n) || n > 64) return false;
+    servers_[i].resize(n);
+    for (uint32_t& s : servers_[i])
+      if (!rd_u32(s)) return false;
+  }
+  for (int i = 0; i < 16; ++i)
+    if (!rd_u32(vectors_[i])) return false;
+  return true;
+}
+
 }  // namespace amiga

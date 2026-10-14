@@ -155,4 +155,23 @@ bool Disk::read_file(int block, std::vector<uint8_t>& out) const {
   return out.size() == size;
 }
 
+bool Disk::save_state(FILE* f) const {
+  uint32_t n = uint32_t(img_.size());
+  uint8_t dirty = dirty_ ? 1 : 0;
+  if (fwrite(&n, 1, 4, f) != 4) return false;
+  if (fwrite(img_.data(), 1, n, f) != n) return false;
+  return fwrite(&dirty, 1, 1, f) == 1;
+}
+
+bool Disk::load_state(FILE* f) {
+  uint32_t n = 0;
+  if (fread(&n, 1, 4, f) != 4 || n != ADF_SIZE) return false;
+  img_.assign(n, 0);
+  if (fread(img_.data(), 1, n, f) != n) return false;
+  uint8_t dirty = 0;
+  if (fread(&dirty, 1, 1, f) != 1) return false;
+  dirty_ = dirty != 0;
+  return true;
+}
+
 }  // namespace amiga

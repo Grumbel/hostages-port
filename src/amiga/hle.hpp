@@ -7,6 +7,7 @@
 #include "amiga/machine.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -44,6 +45,10 @@ struct Hle {
   void update_memlist();
   // The running program returned (or called Exit): continue the script.
   void program_exit();
+
+  // Persist HLE side state for save states (maps, script position, bases…).
+  bool save_state(FILE* f) const;
+  bool load_state(FILE* f);
 
   uint32_t ret_stub = 0;
   uint32_t heap_start = 0;

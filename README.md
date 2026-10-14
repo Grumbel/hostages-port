@@ -80,6 +80,7 @@ The game is played with a joystick in port 2 and the keyboard:
 | F1–F10, other keys | passed to the game as on the Amiga (e.g. F4–F6 select team members in part II, F10 restart) |
 | F11 | fullscreen |
 | Pause | fast forward |
+| F9 / controller Back | debug menu (save states, stage I complete, …) |
 
 ## License
 

@@ -19,6 +19,9 @@ Verified with scripted runs (tests/scenarios):
 - "Hostages": intro, menu (free rank choice), mission, stage I completion
   → helicopter → CLI starts part II → roof (tests/scenarios/hostages)
 - --skip-codes: COMMANDER mission on "Hostage" without the access code
+- Debug menu (controller Back / F9): save/load states (5 slots), complete
+  stage I, soft reset, screenshot, fast-forward toggle
+
 
 ## Open
 

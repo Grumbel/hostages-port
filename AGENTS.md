@@ -111,6 +111,13 @@ No AmigaDOS file system.
   val [b|w|l]` (relative to the running program's a4), `quit` (frame may be
   `+N`); `# args: ...` adds command line options. Input timing during the
   intro changes its course (Return opens the menu in "Hostages").
+- Debug menu (controller **Back** button or **F9**): pauses emulation and
+  shows an overlay. Items: Resume, Save/Load state (slots 1–5 under the
+  save dir `states/`), Slot selector, Complete stage I (pokes the marksmen
+  target words for the active release), Soft reset, Screenshot, Fast
+  forward toggle. Navigation: D-pad / cursor keys, A/Return to activate,
+  Back/Esc/F9 to close. States are full machine snapshots (RAM, CPU,
+  chips, CIAs, disk image, HLE).
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper
   list), `HOSTAGES_SPRDUMP=1` (sprite state every 50 frames),
   `HOSTAGES_WATCHB=hexaddr` (log changes of a byte per frame),

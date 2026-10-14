@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,10 @@ public:
   // Write the image to save_path if it was modified.
   void flush();
   const std::vector<uint8_t>& image() const { return img_; }
+
+  // Save-state helpers: persist the in-memory image and dirty flag.
+  bool save_state(FILE* f) const;
+  bool load_state(FILE* f);
 
   // ---- AmigaDOS (OFS) file system, read-only -----------------------------
   // True if the disk has a valid AmigaDOS root block.
