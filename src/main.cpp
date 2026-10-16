@@ -318,10 +318,9 @@ public:
     if (!machine) return 0;
     const std::string& pn = machine->program_name();
     if (pn == "apro1.") {
-      // Team pick only on the map (F1–F3 are inert in the street). When
-      // targets are set, still offer Continue/Restart from the street too.
-      if (!stage1_on_map() && !stage1_targets_ready()) return 0;
-      int n = stage1_on_map() ? kTeamCountStage1 : 0;
+      // Stage I: map only — no F-key switching in the street.
+      if (!stage1_on_map()) return 0;
+      int n = kTeamCountStage1;
       if (stage1_targets_ready()) n += 2;  // Continue + Restart
       return n;
     }
@@ -347,32 +346,43 @@ public:
   bool char_menu_is_sniper(int i) const { return char_menu_is_member(i) && i < 3; }
   bool char_menu_is_assault(int i) const { return char_menu_is_member(i) && i >= 3; }
 
-  // Stage I marksman record: -20902(a4) + 28*i; +18 alive, +24 hit count.
-  // Stage II table: -32284(a4) + 8*i; word 0 set when activated.
-  uint16_t team_member_status(int i) const {
-    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return 1;
-    const uint32_t a4 = machine->program_a4();
-    if (machine->program_name() == "apro1.")
-      return machine->r16(a4 + uint32_t(-20902 + i * 28 + 18));
-    if (machine->program_name() == "it.")
-      return machine->r16(a4 + uint32_t(-32284 + i * 8));
-    return 1;
+  // Stage I marksman record: -20902(a4) + 28*i; +18 alive, +24 hits, +26 max.
+  // Stage II 8-byte records at -32286(a4): +0 state, +2 availability (-32284).
+  // Death clears availability and sets state to 2 ($7966).
+  uint16_t stage1_alive(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
+      return 0;
+    return machine->r16(machine->program_a4() + uint32_t(-20902 + i * 28 + 18));
   }
 
-  uint16_t team_member_hits(int i) const {
-    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return 0;
-    if (machine->program_name() != "apro1.") return 0;
+  uint16_t stage1_hits(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
+      return 0;
     return machine->r16(machine->program_a4() + uint32_t(-20902 + i * 28 + 24));
   }
 
-  // Stage I on the plan/map uses target slots (man+1 at -206/-7600); the
-  // marksman +18 alive word is only meaningful later in the street phase.
-  // Stage II: activated (status≠0) / not yet / dead (status 0 after any activation).
+  uint16_t stage1_hit_max(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
+      return 0;
+    return machine->r16(machine->program_a4() + uint32_t(-20902 + i * 28 + 26));
+  }
+
+  uint16_t stage2_avail(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage2)
+      return 0;
+    return machine->r16(machine->program_a4() + uint32_t(-32284 + i * 8));
+  }
+
+  uint16_t stage2_state(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage2)
+      return 0;
+    // State word is two bytes before availability in the 8-byte record.
+    return machine->r16(machine->program_a4() + uint32_t(-32286 + i * 8));
+  }
+
   enum TeamState { TS_ALIVE, TS_ON_TARGET, TS_UNSPAWNED, TS_DEAD };
 
   // Stage I: true if marksman i occupies a target slot (stored as man+1).
-  // Trackloader: one word per row at -206(a4), stride 14.
-  // Hostages: 3 slots × word per row at -7600(a4), stride 14 — scan all slots.
   bool stage1_on_target(int i) const {
     if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
       return false;
@@ -393,18 +403,23 @@ public:
   TeamState team_member_state(int i) const {
     if (!char_menu_is_member(i)) return TS_ALIVE;
     if (machine && machine->program_name() == "apro1.") {
-      // Street death: alive cleared and hit counter was climbing.
-      if (team_member_status(i) == 0 && team_member_hits(i) > 0) return TS_DEAD;
-      // Map placement: target table is the real signal (alive stays 0 on map).
+      // On a window cross first (map signal).
       if (stage1_on_target(i)) return TS_ON_TARGET;
-      if (team_member_status(i) != 0) return TS_ALIVE;
+      // Dead: hit counter past threshold, or hits recorded and alive cleared.
+      // (Alive +18 is only maintained in the street; on the map hits/+18 still
+      // reflect street combat after returning via Esc.)
+      const uint16_t hits = stage1_hits(i);
+      const uint16_t alive = stage1_alive(i);
+      const uint16_t mx = stage1_hit_max(i);
+      if (hits > 0 && (alive == 0 || (mx > 0 && hits > mx))) return TS_DEAD;
+      if (alive != 0) return TS_ALIVE;
       return TS_UNSPAWNED;
     }
-    // Stage II: any non-zero slot means the table is live; zero = dead.
-    const uint16_t st = team_member_status(i);
-    if (st != 0) return TS_ALIVE;
-    for (int j = 0; j < kTeamCountStage2; ++j)
-      if (j != i && team_member_status(j) != 0) return TS_DEAD;
+    // Stage II: availability at -32284; death sets it to 0 and state to 2.
+    const uint16_t av = stage2_avail(i);
+    const uint16_t st = stage2_state(i);
+    if (av != 0) return TS_ALIVE;
+    if (st == 2 || st > 0) return TS_DEAD;
     return TS_UNSPAWNED;
   }
 
