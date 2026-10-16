@@ -119,18 +119,15 @@ No AmigaDOS file system.
   Back/Esc/F9 to close. States are full machine snapshots (RAM, CPU,
   chips, CIAs, disk image, HLE).
 - Team select menu (controller **Y / North**): pauses and lists the active
-  team. Stage I (`apro1.`): DELTA, ECHO, MIKE; when the three target words
-  are non-zero also Continue (Return) and Restart (F10). Stage II (`it.`):
-  DELTA, ECHO, MIKE, HOTEL, TANGO, BRAVO. Snipers (0–2) are drawn cyan,
-  assault (3–5, enter the house) amber. Status words (stage I
-  `-20902(a4)+28*i+18`, stage II `-32284(a4)+8*i`) are 0 both before a man
-  is activated and after he dies; greying only applies once the table is
-  in use (any slot non-zero), so the menu stays usable for the initial
-  F1–F6 activation. Selecting an entry injects the matching F-key (or
-  Return/F10) for a few frames. L/R shoulders still map to F1/F2 as a
-  shortcut. Initial selection is the first entry (current active man is a
-  stack-local in the street loop; pre-selecting it needs more reverse
-  engineering).
+  team. Stage I (`apro1.`): only on the plan/map (`-550(a4) ≠ 0`; F1–F3
+  are inert in the street); lists DELTA/ECHO/MIKE plus Continue (Return)
+  / Restart (F10) when the target words are set. Stage II (`it.`): DELTA,
+  ECHO, MIKE, HOTEL, TANGO, BRAVO. Colours: snipers cyan, assault amber;
+  unspawned dim; dead grey (stage I uses hit count at record+24 to tell
+  dead from never-placed). Selecting an entry injects the matching F-key
+  (or Return/F10). L/R shoulders still map to F1/F2. Initial selection is
+  the first entry (current active man is a stack-local in the street
+  loop; pre-selecting it needs more reverse engineering).
 - Controller **B (East)** → Esc (needed in stage II to toggle the map /
   gameplay screen). Space is keyboard-only on gamepad.
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper

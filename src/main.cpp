@@ -293,16 +293,13 @@ public:
   }
 
   // --- Character select menu -----------------------------------------------
-  int char_menu_count() const {
-    if (!machine) return 0;
-    const std::string& pn = machine->program_name();
-    if (pn == "apro1.") {
-      int n = kTeamCountStage1;
-      if (stage1_targets_ready()) n += 2;  // Continue + Restart
-      return n;
-    }
-    if (pn == "it.") return kTeamCountStage2;
-    return 0;
+  // Stage I map flag: -550(a4) is set by the plan/map init ($43EC) and
+  // cleared when the player takes control of a marksman in the street
+  // ($62CE). F1–F3 only do anything while this is non-zero.
+  bool stage1_on_map() const {
+    if (!machine || machine->program_a4() == 0) return false;
+    if (machine->program_name() != "apro1.") return false;
+    return machine->r16(machine->program_a4() + uint32_t(-550)) != 0;
   }
 
   bool stage1_targets_ready() const {
@@ -317,43 +314,55 @@ public:
     return true;
   }
 
+  int char_menu_count() const {
+    if (!machine) return 0;
+    const std::string& pn = machine->program_name();
+    if (pn == "apro1.") {
+      // Team pick only on the map (F1–F3 are inert in the street). When
+      // targets are set, still offer Continue/Restart from the street too.
+      if (!stage1_on_map() && !stage1_targets_ready()) return 0;
+      int n = stage1_on_map() ? kTeamCountStage1 : 0;
+      if (stage1_targets_ready()) n += 2;  // Continue + Restart
+      return n;
+    }
+    if (pn == "it.") return kTeamCountStage2;
+    return 0;
+  }
+
+  // How many leading rows are team members (vs Continue/Restart at the end).
+  int char_menu_member_rows() const {
+    if (!machine) return 0;
+    if (machine->program_name() == "apro1.")
+      return stage1_on_map() ? kTeamCountStage1 : 0;
+    if (machine->program_name() == "it.") return kTeamCountStage2;
+    return 0;
+  }
+
   std::string char_menu_label(int i) const {
     int n = char_menu_count();
     if (i < 0 || i >= n) return "?";
-    if (machine && machine->program_name() == "apro1.") {
-      if (i < kTeamCountStage1) {
-        char buf[24];
-        std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
-        return buf;
-      }
-      if (i == kTeamCountStage1) return "Continue (Return)";
-      return "Restart (F10)";
-    }
-    if (i < kTeamCountStage2) {
+    const int members = char_menu_member_rows();
+    if (i < members) {
       char buf[24];
       std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
       return buf;
     }
-    return "?";
+    // Continue / Restart trail after the member rows.
+    if (i == members) return "Continue (Return)";
+    return "Restart (F10)";
   }
 
   // True for a team-member row (not Continue/Restart). Snipers are 0..2;
   // assault (enter the house) are 3..5 in stage II.
   bool char_menu_is_member(int i) const {
-    if (!machine) return false;
-    if (machine->program_name() == "apro1.") return i >= 0 && i < kTeamCountStage1;
-    if (machine->program_name() == "it.") return i >= 0 && i < kTeamCountStage2;
-    return false;
+    return i >= 0 && i < char_menu_member_rows();
   }
 
   bool char_menu_is_sniper(int i) const { return char_menu_is_member(i) && i < 3; }
   bool char_menu_is_assault(int i) const { return char_menu_is_member(i) && i >= 3; }
 
-  // Per-member status word from the original game tables.
-  // Stage I (apro1.): records at -20902(a4), 28 bytes, alive word at +18
-  //   (cleared when the marksman dies; also 0 before the man is placed).
-  // Stage II (it.):   table at -32284(a4), 8 bytes per man; word 0 is set
-  //   when the man is activated (F1–F6) and cleared when dead.
+  // Stage I marksman record: -20902(a4) + 28*i; +18 alive, +24 hit count.
+  // Stage II table: -32284(a4) + 8*i; word 0 set when activated.
   uint16_t team_member_status(int i) const {
     if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return 1;
     const uint32_t a4 = machine->program_a4();
@@ -364,34 +373,48 @@ public:
     return 1;
   }
 
-  // True once at least one team member has a non-zero status word. Until
-  // then the table is still empty (men not placed / activated yet) and a
-  // zero must not be read as "dead".
-  bool team_table_active() const {
-    if (!machine) return false;
-    int n = 0;
-    if (machine->program_name() == "apro1.") n = kTeamCountStage1;
-    else if (machine->program_name() == "it.") n = kTeamCountStage2;
-    for (int i = 0; i < n; ++i)
-      if (team_member_status(i) != 0) return true;
-    return false;
+  uint16_t team_member_hits(int i) const {
+    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return 0;
+    if (machine->program_name() != "apro1.") return 0;
+    return machine->r16(machine->program_a4() + uint32_t(-20902 + i * 28 + 24));
   }
 
-  // Grey out only after the table is in use and this slot is zero.
-  bool team_member_dead(int i) const {
-    return team_table_active() && team_member_status(i) == 0;
+  // Stage I: placed+alive / not yet placed / dead (hits accumulated).
+  // Stage II: activated (status≠0) / not yet / dead (status 0 after any activation).
+  enum TeamState { TS_ALIVE, TS_UNSPAWNED, TS_DEAD };
+
+  TeamState team_member_state(int i) const {
+    if (!char_menu_is_member(i)) return TS_ALIVE;
+    const uint16_t st = team_member_status(i);
+    if (st != 0) return TS_ALIVE;
+    if (machine && machine->program_name() == "apro1.") {
+      // Hit counter only climbs while the man is in play; stays 0 if never placed.
+      return team_member_hits(i) > 0 ? TS_DEAD : TS_UNSPAWNED;
+    }
+    // Stage II: any non-zero slot means the table is live; zero = dead.
+    for (int j = 0; j < kTeamCountStage2; ++j)
+      if (j != i && team_member_status(j) != 0) return TS_DEAD;
+    return TS_UNSPAWNED;
   }
 
-  // Colour for a menu row: dead = grey; snipers = cyan; assault = amber;
-  // Continue/Restart = neutral; selected rows are brighter.
+  // Colour: dead grey; unspawned dim; snipers cyan; assault amber.
   uint32_t char_menu_color(int i) const {
     const bool sel = (i == char_menu_sel);
-    if (char_menu_is_member(i) && team_member_dead(i))
-      return sel ? 0xFF909090 : 0xFF505050;
-    if (char_menu_is_sniper(i))
-      return sel ? 0xFF80FFFF : 0xFF40C0E0;
-    if (char_menu_is_assault(i))
-      return sel ? 0xFFFFD080 : 0xFFE0A040;
+    if (char_menu_is_member(i)) {
+      switch (team_member_state(i)) {
+        case TS_DEAD:
+          return sel ? 0xFF909090 : 0xFF505050;
+        case TS_UNSPAWNED:
+          // Dim version of the role colour.
+          if (char_menu_is_assault(i))
+            return sel ? 0xFFB08040 : 0xFF705020;
+          return sel ? 0xFF608090 : 0xFF305060;
+        case TS_ALIVE:
+          if (char_menu_is_assault(i))
+            return sel ? 0xFFFFD080 : 0xFFE0A040;
+          return sel ? 0xFF80FFFF : 0xFF40C0E0;
+      }
+    }
     // Continue / Restart
     return sel ? 0xFFFFFF40 : 0xFFD0D0D0;
   }
@@ -414,20 +437,19 @@ public:
     if (!machine) return;
     const int n = char_menu_count();
     if (char_menu_sel < 0 || char_menu_sel >= n) return;
-    // Dead (not merely unspawned) members stay listed but are not selectable.
-    if (char_menu_is_member(char_menu_sel) && team_member_dead(char_menu_sel))
+    // Dead members stay listed but are not selectable; unspawned still are
+    // (F1–F6 activates them).
+    if (char_menu_is_member(char_menu_sel) &&
+        team_member_state(char_menu_sel) == TS_DEAD)
       return;
     int rk = -1;
-    if (machine->program_name() == "apro1.") {
-      if (char_menu_sel < kTeamCountStage1)
-        rk = 0x50 + char_menu_sel;  // F1..F3
-      else if (char_menu_sel == kTeamCountStage1)
-        rk = 0x44;  // Return
-      else
-        rk = 0x59;  // F10
-    } else {
+    const int members = char_menu_member_rows();
+    if (char_menu_sel < members)
       rk = 0x50 + char_menu_sel;  // F1..F6
-    }
+    else if (char_menu_sel == members)
+      rk = 0x44;  // Return / Continue
+    else
+      rk = 0x59;  // F10 / Restart
     close_char_menu();
     if (rk >= 0) {
       machine->key_event(uint8_t(rk), true);

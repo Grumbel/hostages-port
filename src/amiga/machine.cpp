@@ -169,13 +169,13 @@ void Machine::program_loaded(const std::string& name, const std::vector<uint32_t
   }
   if (addrs.empty()) return;
   for (const Patch& p : patches) {
-    if (name != p.program) continue;
+    if (program_name_ != p.program) continue;
     if (p.kind == PatchKind::Protection && !bypass_protection) continue;
     if (p.kind == PatchKind::AccessCodes && !skip_access_codes) continue;
     uint32_t a = addrs[0] + p.offset;
     bool match = p.offset + 2 * p.old.size() <= sizes[0];
     for (size_t i = 0; match && i < p.old.size(); ++i) match = read16(a + 2 * uint32_t(i)) == p.old[i];
-    if (!match) { log("%s: cannot apply patch (%s)\n", name.c_str(), p.what); continue; }
+    if (!match) { log("%s: cannot apply patch (%s)\n", program_name_.c_str(), p.what); continue; }
     for (size_t i = 0; i < p.now.size(); ++i) write16(a + 2 * uint32_t(i), p.now[i]);
   }
 }
