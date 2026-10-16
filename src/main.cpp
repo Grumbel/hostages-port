@@ -952,11 +952,12 @@ public:
 void usage() {
   fprintf(stderr,
           "usage: hostages [options] [disk.adf]\n"
-          "  disk.adf         the game disk: \"Hostage\" (Infogrames trackloader\n"
-          "                   disk) or \"Hostages\" (AmigaDOS disk); default: one of\n"
-          "                   \"Hostage (Infogrames).adf\",\n"
-          "                   \"Hostages (1988)(Infogrames)[cr].adf\" in the current\n"
-          "                   directory, assets/ or the install data dir\n"
+          "  disk.adf         the game disk: \"Hostages\" (AmigaDOS) or \"Hostage\"\n"
+          "                   (trackloader); default search order:\n"
+          "                   \"Hostages (1988)(Infogrames)[cr].adf\",\n"
+          "                   \"Hostages (1988)(Infogrames).adf\",\n"
+          "                   \"Hostage (Infogrames).adf\" in ., assets/ or the\n"
+          "                   install data dir\n"
           "  --scale N        window scale (default 3)\n"
           "  --save DIR       directory for the written disk (game saves)\n"
           "                   (default: $XDG_DATA_HOME/hostages)\n"
@@ -1012,8 +1013,11 @@ int main(int argc, char** argv) {
     else adf_path = a;
   }
   if (adf_path.empty()) {
+    // Prefer the European AmigaDOS release; fall back to the trackloader disk.
     for (std::string cand : {std::string("."), std::string("assets"), std::string(HOSTAGES_DATADIR)}) {
-      for (const char* name : {"Hostage (Infogrames).adf", "Hostages (1988)(Infogrames)[cr].adf"}) {
+      for (const char* name :
+           {"Hostages (1988)(Infogrames)[cr].adf", "Hostages (1988)(Infogrames).adf",
+            "Hostage (Infogrames).adf"}) {
         std::string p = cand + "/" + name;
         if (std::filesystem::exists(p)) { adf_path = p; break; }
       }

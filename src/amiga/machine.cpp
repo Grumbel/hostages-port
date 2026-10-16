@@ -3,6 +3,7 @@
 #include "amiga/hle.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
@@ -155,7 +156,11 @@ const Patch patches[] = {
 
 void Machine::program_loaded(const std::string& name, const std::vector<uint32_t>& addrs,
                              const std::vector<uint32_t>& sizes) {
+  // AmigaDOS OFS names keep their on-disk case ("APRO1." on the cracked
+  // European disk); the trackloader always uses lowercase. Normalize so
+  // patches and the host UI match either release.
   program_name_ = name;
+  for (char& c : program_name_) c = char(std::tolower(static_cast<unsigned char>(c)));
   if (addrs.size() > 1) program_a4_ = addrs[1] + 0x7FFE;
   if (verbose) {
     log("[program] %s:", name.c_str());
