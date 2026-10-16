@@ -338,20 +338,6 @@ public:
     return 0;
   }
 
-  std::string char_menu_label(int i) const {
-    int n = char_menu_count();
-    if (i < 0 || i >= n) return "?";
-    const int members = char_menu_member_rows();
-    if (i < members) {
-      char buf[24];
-      std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
-      return buf;
-    }
-    // Continue / Restart trail after the member rows.
-    if (i == members) return "Continue (Return)";
-    return "Restart (F10)";
-  }
-
   // True for a team-member row (not Continue/Restart). Snipers are 0..2;
   // assault (enter the house) are 3..5 in stage II.
   bool char_menu_is_member(int i) const {
@@ -395,6 +381,44 @@ public:
     for (int j = 0; j < kTeamCountStage2; ++j)
       if (j != i && team_member_status(j) != 0) return TS_DEAD;
     return TS_UNSPAWNED;
+  }
+
+  // Stage I: true if marksman i occupies a target slot (value man+1).
+  bool stage1_on_target(int i) const {
+    if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
+      return false;
+    if (machine->program_name() != "apro1.") return false;
+    const int base = machine->disk.is_dos() ? -7600 : -206;
+    const uint16_t want = uint16_t(i + 1);
+    for (int t = 0; t < 3; ++t) {
+      uint32_t a = machine->program_a4() + uint32_t(base + t * 14);
+      if (machine->r16(a) == want) return true;
+    }
+    return false;
+  }
+
+  std::string char_menu_label(int i) const {
+    int n = char_menu_count();
+    if (i < 0 || i >= n) return "?";
+    const int members = char_menu_member_rows();
+    if (i < members) {
+      const char* status = "";
+      switch (team_member_state(i)) {
+        case TS_DEAD: status = " dead"; break;
+        case TS_UNSPAWNED: status = " -"; break;
+        case TS_ALIVE:
+          if (machine && machine->program_name() == "apro1." && stage1_on_target(i))
+            status = " in pos";
+          else
+            status = " ready";
+          break;
+      }
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "F%d %s%s", i + 1, kTeamNames[i], status);
+      return buf;
+    }
+    if (i == members) return "Continue (Return)";
+    return "Restart (F10)";
   }
 
   // Colour: dead grey; unspawned dim; snipers cyan; assault amber.
@@ -464,7 +488,7 @@ public:
       fb[i] = 0xFF000000u | ((r / 3) << 16) | ((g / 3) << 8) | (b / 3);
     }
     const int n = char_menu_count();
-    constexpr int box_x = 70, box_y = 40, box_w = 180;
+    constexpr int box_x = 60, box_y = 40, box_w = 200;
     const int box_h = 28 + n * 12 + 16;
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40FF80);
