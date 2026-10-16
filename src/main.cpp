@@ -328,6 +328,50 @@ public:
     return kTeamNames[i];
   }
 
+  // True for a team-member row (not Continue/Restart). Snipers are 0..2;
+  // assault (enter the house) are 3..5 in stage II.
+  bool char_menu_is_member(int i) const {
+    if (!machine) return false;
+    if (machine->program_name() == "apro1.") return i >= 0 && i < kTeamCountStage1;
+    if (machine->program_name() == "it.") return i >= 0 && i < kTeamCountStage2;
+    return false;
+  }
+
+  bool char_menu_is_sniper(int i) const { return char_menu_is_member(i) && i < 3; }
+  bool char_menu_is_assault(int i) const { return char_menu_is_member(i) && i >= 3; }
+
+  // Alive flag from the original game tables.
+  // Stage I (apro1.): records at -20902(a4), 28 bytes, alive word at +18.
+  // Stage II (it.):   table at -32284(a4), 8 bytes per man; word 0 non-zero = available.
+  bool team_member_alive(int i) const {
+    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return true;
+    const uint32_t a4 = machine->program_a4();
+    if (machine->program_name() == "apro1.") {
+      // Same layout as docs/spotlight_collision.md / AGENTS.md.
+      uint32_t a = a4 + uint32_t(-20902 + i * 28 + 18);
+      return machine->r16(a) != 0;
+    }
+    if (machine->program_name() == "it.") {
+      uint32_t a = a4 + uint32_t(-32284 + i * 8);
+      return machine->r16(a) != 0;
+    }
+    return true;
+  }
+
+  // Colour for a menu row: dead = grey; snipers = cyan; assault = amber;
+  // Continue/Restart = neutral; selected rows are brighter.
+  uint32_t char_menu_color(int i) const {
+    const bool sel = (i == char_menu_sel);
+    if (char_menu_is_member(i) && !team_member_alive(i))
+      return sel ? 0xFF909090 : 0xFF505050;
+    if (char_menu_is_sniper(i))
+      return sel ? 0xFF80FFFF : 0xFF40C0E0;
+    if (char_menu_is_assault(i))
+      return sel ? 0xFFFFD080 : 0xFFE0A040;
+    // Continue / Restart
+    return sel ? 0xFFFFFF40 : 0xFFD0D0D0;
+  }
+
   void open_char_menu() {
     if (char_menu_count() == 0) return;
     if (menu_open) close_menu();
@@ -346,6 +390,9 @@ public:
     if (!machine) return;
     const int n = char_menu_count();
     if (char_menu_sel < 0 || char_menu_sel >= n) return;
+    // Dead members stay listed (grey) but are not selectable.
+    if (char_menu_is_member(char_menu_sel) && !team_member_alive(char_menu_sel))
+      return;
     int rk = -1;
     if (machine->program_name() == "apro1.") {
       if (char_menu_sel < kTeamCountStage1)
@@ -382,10 +429,9 @@ public:
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + 6, "SELECT TEAM", 0xFF40FF80);
     for (int i = 0; i < n; ++i) {
       int y = box_y + 22 + i * 12;
-      uint32_t col = (i == char_menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
       if (i == char_menu_sel)
         fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
-      draw_text(fb, amiga::FB_W, box_x + 12, y, char_menu_label(i), col);
+      draw_text(fb, amiga::FB_W, box_x + 12, y, char_menu_label(i), char_menu_color(i));
     }
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 12,
               "Up/Down  A  Y/B", 0xFF607080);
