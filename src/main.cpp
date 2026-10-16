@@ -349,29 +349,44 @@ public:
   bool char_menu_is_sniper(int i) const { return char_menu_is_member(i) && i < 3; }
   bool char_menu_is_assault(int i) const { return char_menu_is_member(i) && i >= 3; }
 
-  // Alive flag from the original game tables.
-  // Stage I (apro1.): records at -20902(a4), 28 bytes, alive word at +18.
-  // Stage II (it.):   table at -32284(a4), 8 bytes per man; word 0 non-zero = available.
-  bool team_member_alive(int i) const {
-    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return true;
+  // Per-member status word from the original game tables.
+  // Stage I (apro1.): records at -20902(a4), 28 bytes, alive word at +18
+  //   (cleared when the marksman dies; also 0 before the man is placed).
+  // Stage II (it.):   table at -32284(a4), 8 bytes per man; word 0 is set
+  //   when the man is activated (F1–F6) and cleared when dead.
+  uint16_t team_member_status(int i) const {
+    if (!machine || machine->program_a4() == 0 || !char_menu_is_member(i)) return 1;
     const uint32_t a4 = machine->program_a4();
-    if (machine->program_name() == "apro1.") {
-      // Same layout as docs/spotlight_collision.md / AGENTS.md.
-      uint32_t a = a4 + uint32_t(-20902 + i * 28 + 18);
-      return machine->r16(a) != 0;
-    }
-    if (machine->program_name() == "it.") {
-      uint32_t a = a4 + uint32_t(-32284 + i * 8);
-      return machine->r16(a) != 0;
-    }
-    return true;
+    if (machine->program_name() == "apro1.")
+      return machine->r16(a4 + uint32_t(-20902 + i * 28 + 18));
+    if (machine->program_name() == "it.")
+      return machine->r16(a4 + uint32_t(-32284 + i * 8));
+    return 1;
+  }
+
+  // True once at least one team member has a non-zero status word. Until
+  // then the table is still empty (men not placed / activated yet) and a
+  // zero must not be read as "dead".
+  bool team_table_active() const {
+    if (!machine) return false;
+    int n = 0;
+    if (machine->program_name() == "apro1.") n = kTeamCountStage1;
+    else if (machine->program_name() == "it.") n = kTeamCountStage2;
+    for (int i = 0; i < n; ++i)
+      if (team_member_status(i) != 0) return true;
+    return false;
+  }
+
+  // Grey out only after the table is in use and this slot is zero.
+  bool team_member_dead(int i) const {
+    return team_table_active() && team_member_status(i) == 0;
   }
 
   // Colour for a menu row: dead = grey; snipers = cyan; assault = amber;
   // Continue/Restart = neutral; selected rows are brighter.
   uint32_t char_menu_color(int i) const {
     const bool sel = (i == char_menu_sel);
-    if (char_menu_is_member(i) && !team_member_alive(i))
+    if (char_menu_is_member(i) && team_member_dead(i))
       return sel ? 0xFF909090 : 0xFF505050;
     if (char_menu_is_sniper(i))
       return sel ? 0xFF80FFFF : 0xFF40C0E0;
@@ -399,8 +414,8 @@ public:
     if (!machine) return;
     const int n = char_menu_count();
     if (char_menu_sel < 0 || char_menu_sel >= n) return;
-    // Dead members stay listed (grey) but are not selectable.
-    if (char_menu_is_member(char_menu_sel) && !team_member_alive(char_menu_sel))
+    // Dead (not merely unspawned) members stay listed but are not selectable.
+    if (char_menu_is_member(char_menu_sel) && team_member_dead(char_menu_sel))
       return;
     int rk = -1;
     if (machine->program_name() == "apro1.") {

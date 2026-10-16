@@ -122,9 +122,11 @@ No AmigaDOS file system.
   team. Stage I (`apro1.`): DELTA, ECHO, MIKE; when the three target words
   are non-zero also Continue (Return) and Restart (F10). Stage II (`it.`):
   DELTA, ECHO, MIKE, HOTEL, TANGO, BRAVO. Snipers (0–2) are drawn cyan,
-  assault (3–5, enter the house) amber; dead members are greyed and not
-  activatable. Alive flags: stage I `-20902(a4)+28*i+18`, stage II
-  `-32284(a4)+8*i`. Selecting an entry injects the matching F-key (or
+  assault (3–5, enter the house) amber. Status words (stage I
+  `-20902(a4)+28*i+18`, stage II `-32284(a4)+8*i`) are 0 both before a man
+  is activated and after he dies; greying only applies once the table is
+  in use (any slot non-zero), so the menu stays usable for the initial
+  F1–F6 activation. Selecting an entry injects the matching F-key (or
   Return/F10) for a few frames. L/R shoulders still map to F1/F2 as a
   shortcut. Initial selection is the first entry (current active man is a
   stack-local in the street loop; pre-selecting it needs more reverse
