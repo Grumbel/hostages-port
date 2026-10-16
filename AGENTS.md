@@ -118,6 +118,12 @@ No AmigaDOS file system.
   forward toggle. Navigation: D-pad / cursor keys, A/Return to activate,
   Back/Esc/F9 to close. States are full machine snapshots (RAM, CPU,
   chips, CIAs, disk image, HLE).
+- Team select menu (controller **Y / North**): pauses and lists the active
+  team. Stage I (`apro1.`): DELTA, ECHO, MIKE; when the three target words
+  are non-zero also Continue (Return) and Restart (F10). Stage II (`it.`):
+  DELTA, ECHO, MIKE, HOTEL, TANGO, BRAVO. Selecting an entry injects the
+  matching F-key (or Return/F10) for a few frames. L/R shoulders still map
+  to F1/F2 as a shortcut.
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper
   list), `HOSTAGES_SPRDUMP=1` (sprite state every 50 frames),
   `HOSTAGES_WATCHB=hexaddr` (log changes of a byte per frame),

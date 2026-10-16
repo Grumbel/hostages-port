@@ -21,6 +21,10 @@ Verified with scripted runs (tests/scenarios):
 - --skip-codes: COMMANDER mission on "Hostage" without the access code
 - Debug menu (controller Back / F9): save/load states (5 slots), complete
   stage I, soft reset, screenshot, fast-forward toggle
+- Gamepad team select (Y / North): stage I lists DELTA/ECHO/MIKE (+ Continue
+  / Restart when targets are set); stage II lists all six. Selecting an
+  entry injects the matching F-key / Return / F10. Fully playable without
+  a keyboard for character switching.
 
 
 ## Open

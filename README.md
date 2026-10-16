@@ -70,17 +70,21 @@ Developer options: `--verbose` (log OS calls), `--trace`, `--frames N`,
 
 ## Controls
 
-The game is played with a joystick in port 2 and the keyboard:
+The game is played with a joystick in port 2, the keyboard, or a gamepad:
 
 | Input | Function |
 |-------|----------|
-| Cursor keys / game controller stick | joystick (the game also reads the cursor keys itself) |
+| Cursor keys / game controller stick / D-pad | joystick (the game also reads the cursor keys itself) |
 | Right Ctrl / Space / controller A | fire |
-| Return | confirm / next screen |
-| F1–F10, other keys | passed to the game as on the Amiga (e.g. F4–F6 select team members in part II, F10 restart) |
+| Return / controller X | confirm / next screen |
+| F1–F6 | select team member (DELTA…BRAVO); on a gamepad use **Y (North)** to open the team menu instead |
+| F10 / controller Start | restart current stage |
 | F11 | fullscreen |
 | Pause | fast forward |
 | F9 / controller Back | debug menu (save states, stage I complete, …) |
+| Controller Y (North) | team select menu (stage I: DELTA/ECHO/MIKE; stage II: all six; when stage I targets are set also Continue / Restart) |
+| Controller B | Space |
+| L/R shoulder | F1 / F2 |
 
 ## License
 

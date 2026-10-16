@@ -231,6 +231,19 @@ public:
   // not see the same press as fire/Esc/Return.
   bool menu_wait_release = false;
 
+  // Character / team select menu (controller NORTH / Y). Replaces F1–F6 on
+  // a gamepad: stage I lists DELTA/ECHO/MIKE, stage II all six. When stage I
+  // targets are filled, also offers Continue (Return) and Restart (F10).
+  bool char_menu_open = false;
+  int char_menu_sel = 0;
+  bool pad_y_held = false;
+  bool pad_char_nav[5] = {};
+
+  static constexpr const char* kTeamNames[] = {
+      "DELTA", "ECHO", "MIKE", "HOTEL", "TANGO", "BRAVO"};
+  static constexpr int kTeamCountStage1 = 3;
+  static constexpr int kTeamCountStage2 = 6;
+
   enum MenuItem {
     MI_RESUME = 0,
     MI_SAVE,
@@ -267,6 +280,7 @@ public:
   }
 
   void open_menu() {
+    if (char_menu_open) close_char_menu();
     menu_open = true;
     menu_sel = 0;
     if (machine) machine->debug_pause = true;
@@ -275,7 +289,106 @@ public:
   void close_menu() {
     menu_open = false;
     menu_wait_release = true;
-    if (machine) machine->debug_pause = false;
+    if (machine && !char_menu_open) machine->debug_pause = false;
+  }
+
+  // --- Character select menu -----------------------------------------------
+  int char_menu_count() const {
+    if (!machine) return 0;
+    const std::string& pn = machine->program_name();
+    if (pn == "apro1.") {
+      int n = kTeamCountStage1;
+      if (stage1_targets_ready()) n += 2;  // Continue + Restart
+      return n;
+    }
+    if (pn == "it.") return kTeamCountStage2;
+    return 0;
+  }
+
+  bool stage1_targets_ready() const {
+    if (!machine || machine->program_a4() == 0) return false;
+    if (machine->program_name() != "apro1.") return false;
+    // Same offsets as Machine::complete_stage1().
+    const int base = machine->disk.is_dos() ? -7600 : -206;
+    for (int i = 0; i < 3; ++i) {
+      uint32_t a = machine->program_a4() + uint32_t(base + i * 14);
+      if (machine->r16(a) == 0) return false;
+    }
+    return true;
+  }
+
+  const char* char_menu_label(int i) const {
+    int n = char_menu_count();
+    if (i < 0 || i >= n) return "?";
+    if (machine && machine->program_name() == "apro1.") {
+      if (i < kTeamCountStage1) return kTeamNames[i];
+      if (i == kTeamCountStage1) return "Continue";
+      return "Restart";
+    }
+    return kTeamNames[i];
+  }
+
+  void open_char_menu() {
+    if (char_menu_count() == 0) return;
+    if (menu_open) close_menu();
+    char_menu_open = true;
+    char_menu_sel = 0;
+    if (machine) machine->debug_pause = true;
+  }
+
+  void close_char_menu() {
+    char_menu_open = false;
+    menu_wait_release = true;
+    if (machine && !menu_open) machine->debug_pause = false;
+  }
+
+  void activate_char_menu() {
+    if (!machine) return;
+    const int n = char_menu_count();
+    if (char_menu_sel < 0 || char_menu_sel >= n) return;
+    int rk = -1;
+    if (machine->program_name() == "apro1.") {
+      if (char_menu_sel < kTeamCountStage1)
+        rk = 0x50 + char_menu_sel;  // F1..F3
+      else if (char_menu_sel == kTeamCountStage1)
+        rk = 0x44;  // Return
+      else
+        rk = 0x59;  // F10
+    } else {
+      rk = 0x50 + char_menu_sel;  // F1..F6
+    }
+    close_char_menu();
+    if (rk >= 0) {
+      machine->key_event(uint8_t(rk), true);
+      pending_up.push_back({frame_no + 4, rk});
+    }
+  }
+
+  void draw_char_menu_overlay(uint32_t* fb) {
+    for (int i = 0; i < amiga::FB_W * amiga::VIEW_H; ++i) {
+      uint32_t c = fb[i];
+      uint32_t r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+      fb[i] = 0xFF000000u | ((r / 3) << 16) | ((g / 3) << 8) | (b / 3);
+    }
+    const int n = char_menu_count();
+    constexpr int box_x = 70, box_y = 40, box_w = 180;
+    const int box_h = 28 + n * 12 + 16;
+    fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
+    fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40FF80);
+    fill_rect(fb, amiga::FB_W, box_x, box_y + box_h - 1, box_w, 1, 0xFF40FF80);
+    fill_rect(fb, amiga::FB_W, box_x, box_y, 1, box_h, 0xFF40FF80);
+    fill_rect(fb, amiga::FB_W, box_x + box_w - 1, box_y, 1, box_h, 0xFF40FF80);
+
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + 6, "SELECT TEAM", 0xFF40FF80);
+    for (int i = 0; i < n; ++i) {
+      int y = box_y + 22 + i * 12;
+      uint32_t col = (i == char_menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
+      if (i == char_menu_sel)
+        fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
+      draw_text(fb, amiga::FB_W, box_x + 12, y, char_menu_label(i), col);
+    }
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 12,
+              "Up/Down  A  Y/B", 0xFF607080);
   }
 
   void activate_menu() {
@@ -414,11 +527,12 @@ public:
             SDL_SetWindowFullscreen(win, fl ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             break;
           }
-          if (sc == SDL_SCANCODE_PAUSE && down && !menu_open) { fast = !fast; break; }
+          if (sc == SDL_SCANCODE_PAUSE && down && !menu_open && !char_menu_open) { fast = !fast; break; }
           if (sc == SDL_SCANCODE_F4 && down && (e.key.keysym.mod & KMOD_ALT)) { quit = true; break; }
           // F9 toggles the debug menu (keyboard equivalent of controller Back).
           if (sc == SDL_SCANCODE_F9 && down && !menu_wait_release) {
             if (menu_open) close_menu();
+            else if (char_menu_open) close_char_menu();
             else open_menu();
             break;
           }
@@ -442,6 +556,21 @@ public:
               activate_menu();
             } else if (sc == SDL_SCANCODE_ESCAPE) {
               close_menu();
+            }
+            break;
+          }
+          if (char_menu_open) {
+            if (!down || e.key.repeat) break;
+            const int n = char_menu_count();
+            if (sc == SDL_SCANCODE_UP || sc == SDL_SCANCODE_W) {
+              if (n > 0) char_menu_sel = (char_menu_sel + n - 1) % n;
+            } else if (sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_S) {
+              if (n > 0) char_menu_sel = (char_menu_sel + 1) % n;
+            } else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE ||
+                       sc == SDL_SCANCODE_Z || sc == SDL_SCANCODE_X) {
+              activate_char_menu();
+            } else if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_Y) {
+              close_char_menu();
             }
             break;
           }
@@ -478,7 +607,8 @@ public:
     run_script();
     // Joystick in port 2 from script, keyboard and game controller.
     bool up = false, down = false, left = false, right = false, fire = false;
-    if (!menu_open && !menu_wait_release) {
+    const bool any_menu = menu_open || char_menu_open;
+    if (!any_menu && !menu_wait_release) {
       up = sjoy[0] || kjoy[0];
       down = sjoy[1] || kjoy[1];
       left = sjoy[2] || kjoy[2];
@@ -489,7 +619,7 @@ public:
     else if (menu_wait_release && !menu_controls_held()) {
       menu_wait_release = false;
     }
-    if (!menu_open && !menu_wait_release)
+    if (!any_menu && !menu_wait_release)
       machine->joy_state(up, down, left, right, fire);
     else
       machine->joy_state(false, false, false, false, false);
@@ -508,7 +638,8 @@ public:
     }
     const Uint8* ks = SDL_GetKeyboardState(nullptr);
     if (ks[SDL_SCANCODE_F9] || ks[SDL_SCANCODE_ESCAPE] || ks[SDL_SCANCODE_RETURN] ||
-        ks[SDL_SCANCODE_SPACE] || ks[SDL_SCANCODE_Z] || ks[SDL_SCANCODE_X])
+        ks[SDL_SCANCODE_SPACE] || ks[SDL_SCANCODE_Z] || ks[SDL_SCANCODE_X] ||
+        ks[SDL_SCANCODE_Y])
       return true;
     return false;
   }
@@ -523,6 +654,7 @@ public:
     // does not see the same press (e.g. A as fire, Back as a second edge).
     if (menu_wait_release) {
       pad_back_held = btn(SDL_CONTROLLER_BUTTON_BACK);
+      pad_y_held = btn(SDL_CONTROLLER_BUTTON_Y);
       if (!menu_controls_held()) menu_wait_release = false;
       up = down = left = right = fire = false;
       return;
@@ -532,19 +664,28 @@ public:
     bool back = btn(SDL_CONTROLLER_BUTTON_BACK);
     if (back && !pad_back_held) {
       if (menu_open) close_menu();
+      else if (char_menu_open) close_char_menu();
       else open_menu();
     }
     pad_back_held = back;
 
-    // close_menu() sets menu_wait_release; do not feed the still-held Back
-    // (or A on Resume) into the game on this same frame.
+    // NORTH (Y) opens/closes the character select menu.
+    bool ybtn = btn(SDL_CONTROLLER_BUTTON_Y);
+    if (ybtn && !pad_y_held && !menu_open) {
+      if (char_menu_open) close_char_menu();
+      else open_char_menu();
+    }
+    pad_y_held = ybtn;
+
+    // close_*() sets menu_wait_release; do not feed the still-held button
+    // into the game on this same frame.
     if (menu_wait_release) {
       up = down = left = right = fire = false;
       return;
     }
 
     if (menu_open) {
-      // Edge-triggered navigation while the menu is open.
+      // Edge-triggered navigation while the debug menu is open.
       bool nav[5] = {
           ly < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_UP),
           ly > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN),
@@ -560,7 +701,33 @@ public:
         save_slot = save_slot % 5 + 1;
       if (nav[4] && !pad_menu_nav[4]) activate_menu();
       for (int i = 0; i < 5; ++i) pad_menu_nav[i] = nav[i];
-      // Do not feed joystick/keys to the game while the menu is open.
+      up = down = left = right = fire = false;
+      return;
+    }
+
+    if (char_menu_open) {
+      const int n = char_menu_count();
+      bool nav[5] = {
+          ly < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_UP),
+          ly > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN),
+          false,
+          false,
+          btn(SDL_CONTROLLER_BUTTON_A) || btn(SDL_CONTROLLER_BUTTON_X),
+      };
+      // B also closes.
+      if (btn(SDL_CONTROLLER_BUTTON_B) && !pad_char_nav[2]) {
+        close_char_menu();
+        pad_char_nav[2] = true;
+        up = down = left = right = fire = false;
+        return;
+      }
+      if (!btn(SDL_CONTROLLER_BUTTON_B)) pad_char_nav[2] = false;
+      if (n > 0) {
+        if (nav[0] && !pad_char_nav[0]) char_menu_sel = (char_menu_sel + n - 1) % n;
+        if (nav[1] && !pad_char_nav[1]) char_menu_sel = (char_menu_sel + 1) % n;
+        if (nav[4] && !pad_char_nav[4]) activate_char_menu();
+      }
+      for (int i = 0; i < 5; ++i) if (i != 2) pad_char_nav[i] = nav[i];
       up = down = left = right = fire = false;
       return;
     }
@@ -571,11 +738,10 @@ public:
     right |= lx > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
     fire |= btn(SDL_CONTROLLER_BUTTON_A);
     // Other buttons send keys (held while the button is held).
-    // Back is reserved for the debug menu (above).
+    // Back → debug menu, Y → character menu (above).
     static const struct { SDL_GameControllerButton b; int key; } map[] = {
         {SDL_CONTROLLER_BUTTON_B, 0x40},       // Space
         {SDL_CONTROLLER_BUTTON_X, 0x44},       // Return
-        {SDL_CONTROLLER_BUTTON_Y, 0x41},       // Backspace
         {SDL_CONTROLLER_BUTTON_START, 0x59},   // F10
         {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x50},   // F1
         {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x51},  // F2
@@ -591,10 +757,11 @@ public:
 
   void frame(const uint32_t* fb) override {
     ++frame_no;
-    // Copy into a mutable buffer so the debug menu can composite an overlay.
+    // Copy into a mutable buffer so overlays can composite on top.
     static std::vector<uint32_t> overlay;
     overlay.assign(fb, fb + amiga::FB_W * amiga::VIEW_H);
     if (menu_open) draw_menu_overlay(overlay.data());
+    else if (char_menu_open) draw_char_menu_overlay(overlay.data());
     else if (!status_msg.empty() && frame_no < status_until)
       draw_text(overlay.data(), amiga::FB_W, 4, 4, status_msg.c_str(), 0xFF80FF80);
     SDL_UpdateTexture(tex, nullptr, overlay.data(), amiga::FB_W * 4);
@@ -752,7 +919,10 @@ void usage() {
           "  --script FILE    scripted input (see source)\n"
           "  --grab           capture the mouse at start (F12 toggles)\n"
           "keys: cursor keys/right Ctrl = joystick, F11 fullscreen,\n"
-          "      Pause fast-forward; all other keys go to the game.\n");
+          "      Pause fast-forward, F9 debug menu; all other keys to game.\n"
+          "pad:  stick/D-pad = joystick, A = fire, B = Space, X = Return,\n"
+          "      Y = team select, Back = debug menu, Start = F10,\n"
+          "      L/R shoulder = F1/F2.\n");
 }
 
 }  // namespace
