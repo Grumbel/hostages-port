@@ -740,7 +740,7 @@ public:
     // Other buttons send keys (held while the button is held).
     // Back → debug menu, Y → character menu (above).
     static const struct { SDL_GameControllerButton b; int key; } map[] = {
-        {SDL_CONTROLLER_BUTTON_B, 0x40},       // Space
+        {SDL_CONTROLLER_BUTTON_B, 0x45},       // Esc (EAST) — stage II map / gameplay toggle
         {SDL_CONTROLLER_BUTTON_X, 0x44},       // Return
         {SDL_CONTROLLER_BUTTON_START, 0x59},   // F10
         {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x50},   // F1
@@ -920,7 +920,7 @@ void usage() {
           "  --grab           capture the mouse at start (F12 toggles)\n"
           "keys: cursor keys/right Ctrl = joystick, F11 fullscreen,\n"
           "      Pause fast-forward, F9 debug menu; all other keys to game.\n"
-          "pad:  stick/D-pad = joystick, A = fire, B = Space, X = Return,\n"
+          "pad:  stick/D-pad = joystick, A = fire, B = Esc, X = Return,\n"
           "      Y = team select, Back = debug menu, Start = F10,\n"
           "      L/R shoulder = F1/F2.\n");
 }

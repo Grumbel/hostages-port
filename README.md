@@ -83,7 +83,7 @@ The game is played with a joystick in port 2, the keyboard, or a gamepad:
 | Pause | fast forward |
 | F9 / controller Back | debug menu (save states, stage I complete, …) |
 | Controller Y (North) | team select menu (stage I: DELTA/ECHO/MIKE; stage II: all six; when stage I targets are set also Continue / Restart) |
-| Controller B | Space |
+| Controller B (East) | Esc (stage II map / gameplay screen toggle) |
 | L/R shoulder | F1 / F2 |
 
 ## License

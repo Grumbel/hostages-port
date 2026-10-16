@@ -123,7 +123,11 @@ No AmigaDOS file system.
   are non-zero also Continue (Return) and Restart (F10). Stage II (`it.`):
   DELTA, ECHO, MIKE, HOTEL, TANGO, BRAVO. Selecting an entry injects the
   matching F-key (or Return/F10) for a few frames. L/R shoulders still map
-  to F1/F2 as a shortcut.
+  to F1/F2 as a shortcut. Initial selection is the first entry (current
+  active man is a stack-local in the street loop; pre-selecting it needs
+  more reverse engineering).
+- Controller **B (East)** → Esc (needed in stage II to toggle the map /
+  gameplay screen). Space is keyboard-only on gamepad.
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper
   list), `HOSTAGES_SPRDUMP=1` (sprite state every 50 frames),
   `HOSTAGES_WATCHB=hexaddr` (log changes of a byte per frame),
