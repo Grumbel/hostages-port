@@ -325,7 +325,7 @@ public:
       if (stage1_targets_ready()) n += 2;  // Continue + Restart
       return n;
     }
-    if (pn == "it.") return kTeamCountStage2;
+    if (pn == "it.") return kTeamCountStage2 + 1;  // six men + Restart (F10)
     return 0;
   }
 
@@ -424,7 +424,11 @@ public:
       std::snprintf(buf, sizeof(buf), "F%d %s%s", i + 1, kTeamNames[i], status);
       return buf;
     }
-    if (i == members) return "Continue (Return)";
+    // Stage I: Continue then Restart. Stage II: Restart only.
+    if (machine && machine->program_name() == "apro1.") {
+      if (i == members) return "Continue (Return)";
+      return "Restart (F10)";
+    }
     return "Restart (F10)";
   }
 
@@ -500,7 +504,7 @@ public:
     const int members = char_menu_member_rows();
     if (char_menu_sel < members)
       rk = 0x50 + char_menu_sel;  // F1..F6
-    else if (char_menu_sel == members)
+    else if (machine->program_name() == "apro1." && char_menu_sel == members)
       rk = 0x44;  // Return / Continue
     else
       rk = 0x59;  // F10 / Restart

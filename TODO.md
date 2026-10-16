@@ -35,9 +35,11 @@ Verified with scripted runs (tests/scenarios):
 - [ ] Play part II through rappelling, window breaking and the embassy
       interior to the ending screens (`final.pc1`, "Press F10 to replay
       Part I") and the return to part I
-- [ ] Find out how part I hands its state to part II (it works, but the
-      mechanism is not understood: it.'s team table is never written by
-      it. itself)
+- [ ] Part I→II handoff: it. builds the team table at -32284(a4) by
+      unpacking a packed long at -13218(a4) (nibbles → availability of
+      DELTA/ECHO/MIKE and assault slots). Trace where -13218 is filled
+      (stage-2 loader, shared chip RAM, or a file) — it. does not read
+      apro1.'s marksman records directly.
 - [ ] Add scenarios for the other missions and the time-out/"team
       decimated" screens
 - [ ] Music "a little off" (user report): compare a recording of a real

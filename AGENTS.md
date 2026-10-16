@@ -121,13 +121,12 @@ No AmigaDOS file system.
 - Team select menu (controller **Y / North**): pauses and lists the active
   team. Stage I (`apro1.`): only on the plan/map (`-550(a4) ≠ 0`; F1–F3
   are inert in the street); lists DELTA/ECHO/MIKE plus Continue (Return)
-  / Restart (F10) when the target words are set. Stage II (`it.`): DELTA,
-  ECHO, MIKE, HOTEL, TANGO, BRAVO. Colours: snipers cyan, assault amber;
-  unspawned dim; dead grey (stage I uses hit count at record+24 to tell
-  dead from never-placed). Selecting an entry injects the matching F-key
-  (or Return/F10). L/R shoulders still map to F1/F2. Initial selection
-  tries the current man from -2(a5) (stage I) / -4(a5) (stage II) when
-  the CPU is paused inside that loop; otherwise the first entry.
+  / Restart (F10) when the target words are set (status from target
+  slots at -206/-7600, not street +18). Stage II (`it.`): six men plus
+  Restart (F10). Colours: snipers cyan, assault amber; unspawned dim;
+  dead grey. Selecting an entry injects the matching F-key (or
+  Return/F10). L/R shoulders still map to F1/F2. Initial selection tries
+  -2(a5) (stage I) / -4(a5) (stage II) when paused in that loop.
 - Controller **B (East)** → Esc (needed in stage II to toggle the map /
   gameplay screen). Space is keyboard-only on gamepad.
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper
