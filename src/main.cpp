@@ -317,15 +317,24 @@ public:
     return true;
   }
 
-  const char* char_menu_label(int i) const {
+  std::string char_menu_label(int i) const {
     int n = char_menu_count();
     if (i < 0 || i >= n) return "?";
     if (machine && machine->program_name() == "apro1.") {
-      if (i < kTeamCountStage1) return kTeamNames[i];
+      if (i < kTeamCountStage1) {
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
+        return buf;
+      }
       if (i == kTeamCountStage1) return "Continue";
       return "Restart";
     }
-    return kTeamNames[i];
+    if (i < kTeamCountStage2) {
+      char buf[24];
+      std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
+      return buf;
+    }
+    return "?";
   }
 
   // True for a team-member row (not Continue/Restart). Snipers are 0..2;
@@ -431,7 +440,7 @@ public:
       int y = box_y + 22 + i * 12;
       if (i == char_menu_sel)
         fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
-      draw_text(fb, amiga::FB_W, box_x + 12, y, char_menu_label(i), char_menu_color(i));
+      draw_text(fb, amiga::FB_W, box_x + 12, y, char_menu_label(i).c_str(), char_menu_color(i));
     }
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 12,
               "Up/Down  A  Y/B", 0xFF607080);
