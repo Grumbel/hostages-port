@@ -365,36 +365,47 @@ public:
     return machine->r16(machine->program_a4() + uint32_t(-20902 + i * 28 + 24));
   }
 
-  // Stage I: placed+alive / not yet placed / dead (hits accumulated).
+  // Stage I on the plan/map uses target slots (man+1 at -206/-7600); the
+  // marksman +18 alive word is only meaningful later in the street phase.
   // Stage II: activated (status≠0) / not yet / dead (status 0 after any activation).
-  enum TeamState { TS_ALIVE, TS_UNSPAWNED, TS_DEAD };
+  enum TeamState { TS_ALIVE, TS_ON_TARGET, TS_UNSPAWNED, TS_DEAD };
 
-  TeamState team_member_state(int i) const {
-    if (!char_menu_is_member(i)) return TS_ALIVE;
-    const uint16_t st = team_member_status(i);
-    if (st != 0) return TS_ALIVE;
-    if (machine && machine->program_name() == "apro1.") {
-      // Hit counter only climbs while the man is in play; stays 0 if never placed.
-      return team_member_hits(i) > 0 ? TS_DEAD : TS_UNSPAWNED;
-    }
-    // Stage II: any non-zero slot means the table is live; zero = dead.
-    for (int j = 0; j < kTeamCountStage2; ++j)
-      if (j != i && team_member_status(j) != 0) return TS_DEAD;
-    return TS_UNSPAWNED;
-  }
-
-  // Stage I: true if marksman i occupies a target slot (value man+1).
+  // Stage I: true if marksman i occupies a target slot (stored as man+1).
+  // Trackloader: one word per row at -206(a4), stride 14.
+  // Hostages: 3 slots × word per row at -7600(a4), stride 14 — scan all slots.
   bool stage1_on_target(int i) const {
     if (!machine || machine->program_a4() == 0 || i < 0 || i >= kTeamCountStage1)
       return false;
     if (machine->program_name() != "apro1.") return false;
-    const int base = machine->disk.is_dos() ? -7600 : -206;
+    const bool dos = machine->disk.is_dos();
+    const int base = dos ? -7600 : -206;
+    const int slots = dos ? 3 : 1;
     const uint16_t want = uint16_t(i + 1);
-    for (int t = 0; t < 3; ++t) {
-      uint32_t a = machine->program_a4() + uint32_t(base + t * 14);
-      if (machine->r16(a) == want) return true;
+    for (int row = 0; row < 3; ++row) {
+      for (int s = 0; s < slots; ++s) {
+        uint32_t a = machine->program_a4() + uint32_t(base + row * 14 + s * 2);
+        if (machine->r16(a) == want) return true;
+      }
     }
     return false;
+  }
+
+  TeamState team_member_state(int i) const {
+    if (!char_menu_is_member(i)) return TS_ALIVE;
+    if (machine && machine->program_name() == "apro1.") {
+      // Street death: alive cleared and hit counter was climbing.
+      if (team_member_status(i) == 0 && team_member_hits(i) > 0) return TS_DEAD;
+      // Map placement: target table is the real signal (alive stays 0 on map).
+      if (stage1_on_target(i)) return TS_ON_TARGET;
+      if (team_member_status(i) != 0) return TS_ALIVE;
+      return TS_UNSPAWNED;
+    }
+    // Stage II: any non-zero slot means the table is live; zero = dead.
+    const uint16_t st = team_member_status(i);
+    if (st != 0) return TS_ALIVE;
+    for (int j = 0; j < kTeamCountStage2; ++j)
+      if (j != i && team_member_status(j) != 0) return TS_DEAD;
+    return TS_UNSPAWNED;
   }
 
   std::string char_menu_label(int i) const {
@@ -406,12 +417,8 @@ public:
       switch (team_member_state(i)) {
         case TS_DEAD: status = " dead"; break;
         case TS_UNSPAWNED: status = " -"; break;
-        case TS_ALIVE:
-          if (machine && machine->program_name() == "apro1." && stage1_on_target(i))
-            status = " in pos";
-          else
-            status = " ready";
-          break;
+        case TS_ON_TARGET: status = " in pos"; break;
+        case TS_ALIVE: status = " ready"; break;
       }
       char buf[32];
       std::snprintf(buf, sizeof(buf), "F%d %s%s", i + 1, kTeamNames[i], status);
@@ -421,7 +428,7 @@ public:
     return "Restart (F10)";
   }
 
-  // Colour: dead grey; unspawned dim; snipers cyan; assault amber.
+  // Colour: dead grey; unspawned dim; on-target / ready = role colour.
   uint32_t char_menu_color(int i) const {
     const bool sel = (i == char_menu_sel);
     if (char_menu_is_member(i)) {
@@ -429,10 +436,10 @@ public:
         case TS_DEAD:
           return sel ? 0xFF909090 : 0xFF505050;
         case TS_UNSPAWNED:
-          // Dim version of the role colour.
           if (char_menu_is_assault(i))
             return sel ? 0xFFB08040 : 0xFF705020;
           return sel ? 0xFF608090 : 0xFF305060;
+        case TS_ON_TARGET:
         case TS_ALIVE:
           if (char_menu_is_assault(i))
             return sel ? 0xFFFFD080 : 0xFFE0A040;
