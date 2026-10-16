@@ -76,9 +76,9 @@ The game is played with a joystick in port 2, the keyboard, or a gamepad:
 |-------|----------|
 | Cursor keys / game controller stick / D-pad | joystick (the game also reads the cursor keys itself) |
 | Right Ctrl / Space / controller A | fire |
-| Return / controller X | confirm / next screen |
+| Return / controller X or Start | confirm / next screen / continue |
 | F1–F6 | select team member (DELTA…BRAVO); on a gamepad use **Y (North)** to open the team menu instead |
-| F10 / controller Start | restart current stage |
+| F10 | restart current stage (on gamepad: team menu → Restart when stage I targets are set) |
 | F11 | fullscreen |
 | Pause | fast forward |
 | F9 / controller Back | debug menu (save states, stage I complete, …) |

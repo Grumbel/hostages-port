@@ -326,8 +326,8 @@ public:
         std::snprintf(buf, sizeof(buf), "F%d %s", i + 1, kTeamNames[i]);
         return buf;
       }
-      if (i == kTeamCountStage1) return "Continue";
-      return "Restart";
+      if (i == kTeamCountStage1) return "Continue (Return)";
+      return "Restart (F10)";
     }
     if (i < kTeamCountStage2) {
       char buf[24];
@@ -809,10 +809,11 @@ public:
     fire |= btn(SDL_CONTROLLER_BUTTON_A);
     // Other buttons send keys (held while the button is held).
     // Back → debug menu, Y → character menu (above).
+    // Start and X both mean Return (continue); OR them so releasing one while
+    // the other is held does not drop the key. Restart (F10) is only offered
+    // from the team menu when stage I targets are set.
     static const struct { SDL_GameControllerButton b; int key; } map[] = {
-        {SDL_CONTROLLER_BUTTON_B, 0x45},       // Esc (EAST) — stage II map / gameplay toggle
-        {SDL_CONTROLLER_BUTTON_X, 0x44},       // Return
-        {SDL_CONTROLLER_BUTTON_START, 0x59},   // F10
+        {SDL_CONTROLLER_BUTTON_B, 0x45},              // Esc (EAST)
         {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x50},   // F1
         {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x51},  // F2
     };
@@ -821,6 +822,13 @@ public:
       if (d != pad_held_key[m.key]) {
         pad_held_key[m.key] = d;
         machine->key_event(uint8_t(m.key), d);
+      }
+    }
+    {
+      bool ret = btn(SDL_CONTROLLER_BUTTON_X) || btn(SDL_CONTROLLER_BUTTON_START);
+      if (ret != pad_held_key[0x44]) {
+        pad_held_key[0x44] = ret;
+        machine->key_event(0x44, ret);
       }
     }
   }
@@ -992,8 +1000,8 @@ void usage() {
           "keys: cursor keys/right Ctrl = joystick, F11 fullscreen,\n"
           "      Pause fast-forward, F9 debug menu; all other keys to game.\n"
           "pad:  stick/D-pad = joystick, A = fire, B = Esc, X = Return,\n"
-          "      Y = team select, Back = debug menu, Start = F10,\n"
-          "      L/R shoulder = F1/F2.\n");
+          "      Y = team select, Back = debug menu, Start/X = Return,\n"
+          "      L/R shoulder = F1/F2; restart (F10) via team menu.\n");
 }
 
 }  // namespace
