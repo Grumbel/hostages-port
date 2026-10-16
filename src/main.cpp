@@ -443,11 +443,34 @@ public:
     return sel ? 0xFFFFFF40 : 0xFFD0D0D0;
   }
 
+  // Best-effort current team index from the game's stack frame.
+  // Stage I street/map loop keeps the man index at -2(a5); stage II at
+  // -4(a5). When A5 is not that frame the value is out of range and we
+  // fall back to 0.
+  int active_team_member() const {
+    if (!machine) return 0;
+    const uint32_t a5 = machine->cpu.a[5];
+    if (machine->program_name() == "apro1.") {
+      const int v = int16_t(machine->r16(a5 - 2));
+      if (v >= 0 && v < kTeamCountStage1) return v;
+    } else if (machine->program_name() == "it.") {
+      const int v = int16_t(machine->r16(a5 - 4));
+      if (v >= 0 && v < kTeamCountStage2) return v;
+    }
+    return 0;
+  }
+
   void open_char_menu() {
     if (char_menu_count() == 0) return;
     if (menu_open) close_menu();
     char_menu_open = true;
-    char_menu_sel = 0;
+    const int n = char_menu_count();
+    const int members = char_menu_member_rows();
+    int sel = active_team_member();
+    if (sel < 0 || sel >= members) sel = 0;
+    if (members == 0) sel = 0;  // Continue/Restart-only menu
+    if (sel >= n) sel = 0;
+    char_menu_sel = sel;
     if (machine) machine->debug_pause = true;
   }
 

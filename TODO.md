@@ -21,10 +21,12 @@ Verified with scripted runs (tests/scenarios):
 - --skip-codes: COMMANDER mission on "Hostage" without the access code
 - Debug menu (controller Back / F9): save/load states (5 slots), complete
   stage I, soft reset, screenshot, fast-forward toggle
-- Gamepad team select (Y / North): stage I lists DELTA/ECHO/MIKE (+ Continue
-  / Restart when targets are set); stage II lists all six. Selecting an
-  entry injects the matching F-key / Return / F10. Fully playable without
-  a keyboard for character switching.
+- Gamepad team select (Y / North): stage I only on the plan/map, lists
+  DELTA/ECHO/MIKE with status text (in pos / ready / dead / -) and role
+  colours; Continue/Restart when targets are set. Stage II lists all six.
+  Start/X = Return (continue); F10 restart via the team menu. East (B) =
+  Esc (stage II map toggle). Fully playable without a keyboard for
+  character switching and stage advance.
 
 
 ## Open

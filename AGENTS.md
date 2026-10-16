@@ -125,9 +125,9 @@ No AmigaDOS file system.
   ECHO, MIKE, HOTEL, TANGO, BRAVO. Colours: snipers cyan, assault amber;
   unspawned dim; dead grey (stage I uses hit count at record+24 to tell
   dead from never-placed). Selecting an entry injects the matching F-key
-  (or Return/F10). L/R shoulders still map to F1/F2. Initial selection is
-  the first entry (current active man is a stack-local in the street
-  loop; pre-selecting it needs more reverse engineering).
+  (or Return/F10). L/R shoulders still map to F1/F2. Initial selection
+  tries the current man from -2(a5) (stage I) / -4(a5) (stage II) when
+  the CPU is paused inside that loop; otherwise the first entry.
 - Controller **B (East)** → Esc (needed in stage II to toggle the map /
   gameplay screen). Space is keyboard-only on gamepad.
 - Debug environment variables: `HOSTAGES_COPDUMP=frame` (dump the copper
