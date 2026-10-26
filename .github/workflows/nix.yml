@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025–2026 Ingo Ruhnke <grumbel@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: nix
+on:
+  push:
+  pull_request:
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: checks and Linux package
+        run: |
+          nix build .#checks.version -L
+          nix build .#hostages -L
+  # Cross targets are optional and heavier; build on demand via workflow_dispatch later.

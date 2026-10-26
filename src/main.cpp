@@ -1160,7 +1160,17 @@ int main(int argc, char** argv) {
     }
     else adf_path = a;
   }
-  if (save_dir.empty()) {
+#ifdef __EMSCRIPTEN__
+  // Persist writable state under IDBFS. HOME steers SDL_GetPrefPath.
+  EM_ASM({
+    try { FS.mkdir('/persist'); } catch (e) {}
+    FS.mount(IDBFS, {}, '/persist');
+    FS.syncfs(true, function (err) {});
+  });
+  setenv("HOME", "/persist", 1);
+#endif
+
+    if (save_dir.empty()) {
 #if defined(_WIN32) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     // SDL owns the directory layout on these platforms (IDBFS on the web).
     char* pref = SDL_GetPrefPath("grumbel", "hostages");
@@ -1254,6 +1264,7 @@ int main(int argc, char** argv) {
   emscripten_set_main_loop([] {
     if (!g_machine->step_frame()) {
       g_host->close_wav();
+      EM_ASM({ FS.syncfs(false, function (err) {}); });
       emscripten_cancel_main_loop();
     }
   }, 0, 1);

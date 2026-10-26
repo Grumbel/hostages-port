@@ -76,6 +76,10 @@ target_link_libraries(amiga PUBLIC m68k)
 
 add_executable(hostages src/main.cpp)
 target_link_libraries(hostages PRIVATE amiga SDL2::SDL2)
+
+if(HOSTAGES_CXXABI_SHIM)
+  target_sources(hostages PRIVATE "${HOSTAGES_CXXABI_SHIM}")
+endif()
 target_compile_definitions(hostages PRIVATE
   HOSTAGES_VERSION="${PROJECT_VERSION_FULL}"
 )
@@ -107,6 +111,7 @@ if(EMSCRIPTEN)
     "SHELL:-s ASSERTIONS=0"
     "SHELL:-s MAX_WEBGL_VERSION=0"
     "SHELL:-s ENVIRONMENT=web"
+    "SHELL:-lidbfs.js"
     "SHELL:--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/mk/wasm/shell.html"
   )
   # Asyncify not required: step_frame returns each frame.
