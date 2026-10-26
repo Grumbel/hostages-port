@@ -664,4 +664,74 @@ bool Machine::load_state(const std::string& path) {
   return true;
 }
 
+bool Machine::summarize_save(const std::string& path, SaveSummary& out) {
+  out = SaveSummary{};
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f) return false;
+  auto fail = [&]() { fclose(f); return false; };
+
+  char magic[8] = {};
+  if (fread(magic, 1, 8, f) != 8 || std::memcmp(magic, "HOSTSAV1", 8) != 0) return fail();
+
+  m68k::Cpu::Regs regs{};
+  if (fread(&regs, 1, sizeof(regs), f) != sizeof(regs)) return fail();
+  int64_t cycles = 0;
+  uint32_t op_pc = 0;
+  if (fread(&cycles, 1, sizeof(cycles), f) != sizeof(cycles)) return fail();
+  if (fread(&op_pc, 1, sizeof(op_pc), f) != sizeof(op_pc)) return fail();
+
+  out.chip.resize(CHIP_SIZE);
+  out.slow.resize(SLOW_SIZE);
+  if (fread(out.chip.data(), 1, CHIP_SIZE, f) != CHIP_SIZE) return fail();
+  if (fread(out.slow.data(), 1, SLOW_SIZE, f) != SLOW_SIZE) return fail();
+
+  CustomState cs{};
+  Cia cia0{}, cia1{};
+  if (fread(&cs, 1, sizeof(cs), f) != sizeof(cs)) return fail();
+  if (fread(&cia0, 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+  if (fread(&cia1, 1, sizeof(Cia), f) != sizeof(Cia)) return fail();
+
+  auto rd_u64 = [&](uint64_t& v) { return fread(&v, 1, 8, f) == 8; };
+  auto rd_u32 = [&](uint32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_i32 = [&](int32_t& v) { return fread(&v, 1, 4, f) == 4; };
+  auto rd_i64 = [&](int64_t& v) { return fread(&v, 1, 8, f) == 8; };
+  auto rd_str = [&](std::string& s) {
+    uint32_t n = 0;
+    if (!rd_u32(n) || n > 1024) return false;
+    s.resize(n);
+    return n == 0 || fread(s.data(), 1, n, f) == n;
+  };
+
+  int64_t line_start = 0, line_cycles = 0, cia_sync = 0;
+  double eclk = 0;
+  if (!rd_i64(line_start) || !rd_i64(line_cycles) || !rd_i64(cia_sync)) return fail();
+  if (fread(&eclk, 1, sizeof(eclk), f) != sizeof(eclk)) return fail();
+  int32_t vpos = 0, call_depth = 0;
+  uint64_t frame_count = 0;
+  if (!rd_i32(vpos) || !rd_u64(frame_count) || !rd_i32(call_depth)) return fail();
+  uint8_t z = 0;
+  if (fread(&z, 1, 1, f) != 1) return fail();
+  int32_t first_bpl = 0, view_top = 0, cyl = 0, side = 0, mx = 0, my = 0, kh = 0;
+  if (!rd_i32(first_bpl) || !rd_i32(view_top)) return fail();
+  if (!rd_i32(cyl) || !rd_i32(side)) return fail();
+  uint8_t motor = 0;
+  if (fread(&motor, 1, 1, f) != 1) return fail();
+  if (!rd_i32(mx) || !rd_i32(my)) return fail();
+  uint8_t buttons = 0, joy = 0;
+  if (fread(&buttons, 1, 1, f) != 1 || fread(&joy, 1, 1, f) != 1) return fail();
+  if (!rd_i32(kh)) return fail();
+  uint32_t nkeys = 0;
+  if (!rd_u32(nkeys) || nkeys > 256) return fail();
+  for (uint32_t i = 0; i < nkeys; ++i) {
+    uint8_t k = 0;
+    if (fread(&k, 1, 1, f) != 1) return fail();
+  }
+  if (!rd_u32(out.program_a4) || !rd_str(out.program_name)) return fail();
+
+  fclose(f);
+  out.ok = true;
+  return true;
+}
+
+
 }  // namespace amiga

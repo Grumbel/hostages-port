@@ -181,6 +181,25 @@ public:
   // Snapshot the whole machine (RAM, CPU, chips, CIAs, disk, HLE) to path.
   bool save_state(const std::string& path) const;
   bool load_state(const std::string& path);
+
+  // Lightweight view of a HOSTSAV1 file for UI labels (does not touch the live machine).
+  struct SaveSummary {
+    bool ok = false;
+    std::string program_name;
+    uint32_t program_a4 = 0;
+    std::vector<uint8_t> chip;
+    std::vector<uint8_t> slow;
+    uint8_t read8(uint32_t a) const {
+      a &= 0xFFFFFF;
+      if (a < chip.size()) return chip[size_t(a)];
+      if (a >= SLOW_BASE && (a - SLOW_BASE) < slow.size()) return slow[size_t(a - SLOW_BASE)];
+      return 0;
+    }
+    uint16_t read16(uint32_t a) const {
+      return uint16_t(uint16_t(read8(a)) << 8 | read8(a + 1));
+    }
+  };
+  static bool summarize_save(const std::string& path, SaveSummary& out);
   // Soft-reset: re-run boot() with the same ADF/save paths.
   bool soft_reset();
   // Force stage-I marksmen into target positions so Return advances to part II

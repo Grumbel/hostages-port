@@ -282,25 +282,10 @@ public:
     return save_dir + "/states/slot" + std::to_string(slot) + ".sav";
   }
 
-  std::string slot_meta_path(int slot) const {
-    return save_dir + "/states/slot" + std::to_string(slot) + ".meta";
-  }
-
   // Compact label lines for a save slot (drawn as two rows in the submenu).
   struct SlotLabel {
-    std::string line1;  // e.g. "#3  S1  CAPT  10-26 14:32"
-    std::string line2;  // e.g. "dead:ECHO" or "team OK"
-  };
-
-  // Snapshot of game-relevant fields written beside the .sav file.
-  struct SlotMeta {
-    std::string program;   // apro1. / it.
-    int stage = 0;         // 1, 2, or 0 unknown
-    std::string rank;      // CAPTAIN, …
-    std::string mission;   // ASSAULT, JUPITER, …
-    std::string team;      // per-member: A/T/U/D (alive/target/unspawned/dead)
-    std::string dead;      // comma-separated short names of dead members
-    std::string time;      // local "YYYY-MM-DD HH:MM"
+    std::string line1;
+    std::string line2;
   };
 
   // Occupied slot numbers in ascending order (files under states/).
@@ -319,15 +304,13 @@ public:
     return 0;
   }
 
-  // Save submenu rows: existing slots (overwrite), optional "New save", then Back.
-  // Load submenu rows: existing slots, then Back. Empty load list still has Back.
   int submenu_row_count() const {
     const int n = int(existing_slots().size());
     if (submenu == SubMenu::Save) {
       const bool can_new = first_free_slot() != 0;
-      return n + (can_new ? 1 : 0) + 1;  // + Back
+      return n + (can_new ? 1 : 0) + 1;
     }
-    if (submenu == SubMenu::Load) return n + 1;  // + Back
+    if (submenu == SubMenu::Load) return n + 1;
     return 0;
   }
 
@@ -348,142 +331,9 @@ public:
     return 0;
   }
 
-  // Pixel height of one selectable row (slot entries use two text lines).
   int submenu_row_height(int row) const {
     if (submenu_row_is_back(row) || submenu_row_is_new(row)) return 12;
-    return 22;  // two lines of 5×7 text + gap
-  }
-
-  void open_submenu(SubMenu which) {
-    submenu = which;
-    submenu_sel = 0;
-  }
-
-  void close_submenu() {
-    submenu = SubMenu::None;
-    submenu_sel = 0;
-  }
-
-  // Best-effort rank/mission: first match of known tokens in chip RAM.
-  static std::string scan_chip_token(amiga::Machine* m, const char* const* tokens, int ntok) {
-    if (!m) return {};
-    for (int t = 0; t < ntok; ++t) {
-      const char* tok = tokens[t];
-      const size_t len = std::strlen(tok);
-      if (len == 0 || len > 32) continue;
-      for (uint32_t a = 0; a + len < amiga::CHIP_SIZE; ++a) {
-        bool ok = true;
-        for (size_t i = 0; i < len; ++i) {
-          if (char(m->r8(a + uint32_t(i))) != tok[i]) { ok = false; break; }
-        }
-        if (ok) return tok;
-      }
-    }
-    return {};
-  }
-
-  SlotMeta collect_slot_meta() const {
-    SlotMeta meta;
-    {
-      std::time_t now = std::time(nullptr);
-      std::tm tm{};
-#if defined(_WIN32)
-      localtime_s(&tm, &now);
-#else
-      localtime_r(&now, &tm);
-#endif
-      char buf[32];
-      std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
-                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
-      meta.time = buf;
-    }
-    if (!machine) return meta;
-    meta.program = machine->program_name();
-    if (meta.program == "apro1.") meta.stage = 1;
-    else if (meta.program == "it.") meta.stage = 2;
-
-    static const char* ranks[] = {"COMMANDER", "CAPTAIN", "LIEUTENANT", "SERGEANT"};
-    static const char* missions[] = {"JUPITER", "ASSAULT", "EMBASSY"};
-    meta.rank = scan_chip_token(machine, ranks, 4);
-    meta.mission = scan_chip_token(machine, missions, 3);
-
-    const int n = (meta.stage == 2) ? kTeamCountStage2
-                : (meta.stage == 1) ? kTeamCountStage1 : 0;
-    meta.team.resize(size_t(n), '?');
-    for (int i = 0; i < n; ++i) {
-      TeamState st = team_member_state(i);
-      char c = 'U';
-      switch (st) {
-        case TS_ALIVE: c = 'A'; break;
-        case TS_ON_TARGET: c = 'T'; break;
-        case TS_UNSPAWNED: c = 'U'; break;
-        case TS_DEAD: c = 'D'; break;
-      }
-      meta.team[size_t(i)] = c;
-      if (st == TS_DEAD) {
-        if (!meta.dead.empty()) meta.dead += ',';
-        // Compact name: first letter of team code
-        meta.dead += kTeamNames[i][0];
-        // Prefer full short name if room allows later; store letter for compact UI
-      }
-    }
-    return meta;
-  }
-
-  void write_slot_meta(int slot, const SlotMeta& meta) const {
-    std::filesystem::create_directories(save_dir + "/states");
-    FILE* f = std::fopen(slot_meta_path(slot).c_str(), "w");
-    if (!f) return;
-    std::fprintf(f, "v=1\n");
-    std::fprintf(f, "program=%s\n", meta.program.c_str());
-    std::fprintf(f, "stage=%d\n", meta.stage);
-    std::fprintf(f, "rank=%s\n", meta.rank.c_str());
-    std::fprintf(f, "mission=%s\n", meta.mission.c_str());
-    std::fprintf(f, "team=%s\n", meta.team.c_str());
-    std::fprintf(f, "dead=%s\n", meta.dead.c_str());
-    std::fprintf(f, "time=%s\n", meta.time.c_str());
-    std::fclose(f);
-  }
-
-  SlotMeta read_slot_meta(int slot) const {
-    SlotMeta meta;
-    FILE* f = std::fopen(slot_meta_path(slot).c_str(), "r");
-    if (!f) {
-      // No sidecar: show file mtime only.
-      struct stat st {};
-      if (stat(slot_path(slot).c_str(), &st) == 0) {
-        std::tm tm{};
-#if defined(_WIN32)
-        localtime_s(&tm, &st.st_mtime);
-#else
-        localtime_r(&st.st_mtime, &tm);
-#endif
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
-                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
-        meta.time = buf;
-      }
-      return meta;
-    }
-    char line[128];
-    while (std::fgets(line, sizeof(line), f)) {
-      char* nl = std::strchr(line, '\n');
-      if (nl) *nl = 0;
-      char* eq = std::strchr(line, '=');
-      if (!eq) continue;
-      *eq = 0;
-      const char* key = line;
-      const char* val = eq + 1;
-      if (std::strcmp(key, "program") == 0) meta.program = val;
-      else if (std::strcmp(key, "stage") == 0) meta.stage = std::atoi(val);
-      else if (std::strcmp(key, "rank") == 0) meta.rank = val;
-      else if (std::strcmp(key, "mission") == 0) meta.mission = val;
-      else if (std::strcmp(key, "team") == 0) meta.team = val;
-      else if (std::strcmp(key, "dead") == 0) meta.dead = val;
-      else if (std::strcmp(key, "time") == 0) meta.time = val;
-    }
-    std::fclose(f);
-    return meta;
+    return 22;
   }
 
   static std::string abbreviate_rank(const std::string& r) {
@@ -494,32 +344,99 @@ public:
     return r;
   }
 
-  SlotLabel format_slot_label(int slot, bool overwrite) const {
-    SlotMeta m = read_slot_meta(slot);
-    SlotLabel lab;
-    char l1[48];
-    // "#3 S1 CAPT" + time on the right when it fits
-    char stage[8] = "";
-    if (m.stage == 1) std::snprintf(stage, sizeof(stage), "S1");
-    else if (m.stage == 2) std::snprintf(stage, sizeof(stage), "S2");
-    else if (!m.program.empty()) {
-      // Truncate program name
-      std::snprintf(stage, sizeof(stage), "%.4s", m.program.c_str());
+  static std::string scan_buf_token(const amiga::Machine::SaveSummary& s,
+                                    const char* const* tokens, int ntok) {
+    for (int t = 0; t < ntok; ++t) {
+      const char* tok = tokens[t];
+      const size_t len = std::strlen(tok);
+      if (len == 0 || len > 32) continue;
+      for (size_t a = 0; a + len < s.chip.size(); ++a) {
+        bool ok = true;
+        for (size_t i = 0; i < len; ++i) {
+          if (char(s.chip[a + i]) != tok[i]) { ok = false; break; }
+        }
+        if (ok) return tok;
+      }
     }
-    const char* rank = m.rank.empty() ? "" : abbreviate_rank(m.rank).c_str();
-    const char* miss = m.mission.empty() ? "" : m.mission.c_str();
-    // Prefer rank over mission on line 1 if both present; mission goes to line 2.
+    return {};
+  }
+
+  // Build menu lines from the .sav itself (HOSTSAV1 + chip/slow + program_a4/name).
+  SlotLabel format_slot_label(int slot, bool overwrite) const {
+    SlotLabel lab;
+    amiga::Machine::SaveSummary sum;
+    const bool ok = amiga::Machine::summarize_save(slot_path(slot), sum);
+
+    char stage[8] = "";
+    std::string rank, mission, dead, team;
+    if (ok) {
+      if (sum.program_name == "apro1.") std::snprintf(stage, sizeof(stage), "S1");
+      else if (sum.program_name == "it.") std::snprintf(stage, sizeof(stage), "S2");
+      else if (!sum.program_name.empty())
+        std::snprintf(stage, sizeof(stage), "%.4s", sum.program_name.c_str());
+
+      static const char* ranks[] = {"COMMANDER", "CAPTAIN", "LIEUTENANT", "SERGEANT"};
+      static const char* missions[] = {"JUPITER", "ASSAULT", "EMBASSY"};
+      rank = scan_buf_token(sum, ranks, 4);
+      mission = scan_buf_token(sum, missions, 3);
+
+      const int n = (sum.program_name == "it.") ? kTeamCountStage2
+                  : (sum.program_name == "apro1.") ? kTeamCountStage1 : 0;
+      team.resize(size_t(n), '?');
+      for (int i = 0; i < n; ++i) {
+        char c = 'U';
+        if (sum.program_name == "apro1.") {
+          const uint32_t base = sum.program_a4 + uint32_t(-20902 + i * 28);
+          const uint16_t alive = sum.read16(base + 18);
+          const uint16_t hits = sum.read16(base + 24);
+          const uint16_t mx = sum.read16(base + 26);
+          // Target slots: -206 or -7600 depending on release — approximate via hits/alive.
+          if (hits > 0 && (alive == 0 || (mx > 0 && hits > mx))) c = 'D';
+          else if (alive != 0) c = 'A';
+          else c = 'U';
+        } else {
+          // Stage II: availability -32284(a4)+8*i, state -32286(a4)+8*i (see team_member_state).
+          const uint16_t av = sum.read16(sum.program_a4 + uint32_t(-32284 + i * 8));
+          const uint16_t st = sum.read16(sum.program_a4 + uint32_t(-32286 + i * 8));
+          if (av != 0) c = 'A';
+          else if (st == 2 || st > 0) c = 'D';
+          else c = 'U';
+        }
+        team[size_t(i)] = c;
+        if (c == 'D') {
+          if (!dead.empty()) dead += ',';
+          dead += kTeamNames[i][0];
+        }
+      }
+    }
+
+    // File mtime for the date column
+    std::string timestr;
+    {
+      struct stat st {};
+      if (stat(slot_path(slot).c_str(), &st) == 0) {
+        std::tm tm{};
+#if defined(_WIN32)
+        localtime_s(&tm, &st.st_mtime);
+#else
+        localtime_r(&st.st_mtime, &tm);
+#endif
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%02d-%02d %02d:%02d",
+                      tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+        timestr = buf;
+      }
+    }
+
+    char l1[48];
+    const std::string rank_ab = abbreviate_rank(rank);
     if (overwrite)
-      std::snprintf(l1, sizeof(l1), "Rep #%d %s %s", slot, stage, rank);
+      std::snprintf(l1, sizeof(l1), "Rep #%d %s %s", slot, stage, rank_ab.c_str());
     else
-      std::snprintf(l1, sizeof(l1), "#%d %s %s", slot, stage, rank);
-    // Append short time (MM-DD HH:MM) if space remains (≈40 cols at 6px).
-    if (!m.time.empty()) {
-      std::string tshort = m.time;
-      // "YYYY-MM-DD HH:MM" -> "MM-DD HH:MM"
-      if (tshort.size() >= 16) tshort = tshort.substr(5);
+      std::snprintf(l1, sizeof(l1), "#%d %s %s", slot, stage, rank_ab.c_str());
+    if (!timestr.empty()) {
       char with_time[48];
-      std::snprintf(with_time, sizeof(with_time), "%s  %s", l1, tshort.c_str());
+      std::snprintf(with_time, sizeof(with_time), "%s  %s", l1, timestr.c_str());
       if (std::strlen(with_time) <= 36)
         std::snprintf(l1, sizeof(l1), "%s", with_time);
     }
@@ -527,25 +444,32 @@ public:
 
     char l2[48];
     l2[0] = 0;
-    if (!m.dead.empty())
-      std::snprintf(l2, sizeof(l2), "dead:%s", m.dead.c_str());
-    else if (!m.team.empty()) {
-      // Show team letter strip: DEM… with lowercased dead already in dead field
-      std::snprintf(l2, sizeof(l2), "team:%s", m.team.c_str());
-    }
-    if (miss[0]) {
+    if (!dead.empty())
+      std::snprintf(l2, sizeof(l2), "dead:%s", dead.c_str());
+    else if (!team.empty())
+      std::snprintf(l2, sizeof(l2), "team:%s", team.c_str());
+    if (!mission.empty()) {
       if (l2[0]) {
         char both[48];
-        std::snprintf(both, sizeof(both), "%s %s", l2, miss);
-        if (std::strlen(both) <= 36)
-          std::snprintf(l2, sizeof(l2), "%s", both);
+        std::snprintf(both, sizeof(both), "%s %s", l2, mission.c_str());
+        if (std::strlen(both) <= 36) std::snprintf(l2, sizeof(l2), "%s", both);
       } else {
-        std::snprintf(l2, sizeof(l2), "%s", miss);
+        std::snprintf(l2, sizeof(l2), "%s", mission.c_str());
       }
     }
-    if (!l2[0]) std::snprintf(l2, sizeof(l2), "-");
+    if (!l2[0]) std::snprintf(l2, sizeof(l2), ok ? "-" : "(unreadable)");
     lab.line2 = l2;
     return lab;
+  }
+
+  void open_submenu(SubMenu which) {
+    submenu = which;
+    submenu_sel = 0;
+  }
+
+  void close_submenu() {
+    submenu = SubMenu::None;
+    submenu_sel = 0;
   }
 
   void set_status(const std::string& s) {
@@ -835,10 +759,9 @@ public:
   void do_save_slot(int slot) {
     if (!machine || slot <= 0) return;
     std::filesystem::create_directories(save_dir + "/states");
-    if (machine->save_state(slot_path(slot))) {
-      write_slot_meta(slot, collect_slot_meta());
+    if (machine->save_state(slot_path(slot)))
       set_status("Saved slot " + std::to_string(slot));
-    } else
+    else
       set_status("Save failed");
   }
 
