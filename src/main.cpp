@@ -231,6 +231,7 @@ public:
   enum class SubMenu { None, Save, Load };
   SubMenu submenu = SubMenu::None;
   int submenu_sel = 0;
+  int menu_scroll = 0;  // first visible row (main or submenu)
   std::string save_dir;
   std::string status_msg;
   int status_until = 0;  // frame_no when status_msg clears
@@ -465,11 +466,13 @@ public:
   void open_submenu(SubMenu which) {
     submenu = which;
     submenu_sel = 0;
+    menu_scroll = 0;
   }
 
   void close_submenu() {
     submenu = SubMenu::None;
     submenu_sel = 0;
+    menu_scroll = 0;
   }
 
   void set_status(const std::string& s) {
@@ -481,6 +484,7 @@ public:
     if (char_menu_open) close_char_menu();
     menu_open = true;
     menu_sel = 0;
+    menu_scroll = 0;
     close_submenu();
     if (machine) machine->debug_pause = true;
   }
@@ -789,12 +793,12 @@ public:
           return;
         }
         do_save_slot(slot);
-        close_submenu();
+        close_menu();
         return;
       }
       int slot = submenu_row_slot(submenu_sel);
       do_save_slot(slot);
-      close_submenu();
+      close_menu();
       return;
     }
     if (submenu == SubMenu::Load) {
@@ -804,7 +808,7 @@ public:
         return;
       }
       do_load_slot(slot);
-      close_submenu();
+      close_menu();
     }
   }
 
@@ -855,13 +859,12 @@ public:
     const bool sub = submenu != SubMenu::None;
     const int rows = sub ? submenu_row_count() : MI_COUNT;
     const int box_x = 28, box_y = 12, box_w = 264;
-    int content_h = 0;
-    if (sub) {
-      for (int i = 0; i < rows; ++i) content_h += submenu_row_height(i);
-    } else {
-      content_h = rows * 12;
-    }
-    const int box_h = std::min(amiga::VIEW_H - 16, 36 + content_h + 22);
+    // Fixed panel height with a scrollable list region.
+    const int box_h = amiga::VIEW_H - 24;
+    const int list_top = box_y + 30;
+    const int list_h = box_h - 30 - 22;  // below header, above footer
+    ensure_menu_scroll(list_h);
+
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40A0FF);
     fill_rect(fb, amiga::FB_W, box_x, box_y + box_h - 1, box_w, 1, 0xFF40A0FF);
@@ -879,14 +882,20 @@ public:
                       : "-");
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + 16, info, 0xFF808890);
 
-    if (sub) {
-      auto slots = existing_slots();
-      int y = box_y + 30;
-      for (int i = 0; i < rows; ++i) {
-        const int rh = submenu_row_height(i);
-        uint32_t col = (i == submenu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
-        if (i == submenu_sel)
-          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, rh, 0xFF203040);
+    int y = list_top;
+    bool more_above = menu_scroll > 0;
+    bool more_below = false;
+    for (int i = menu_scroll; i < rows; ++i) {
+      const int rh = menu_row_height(i);
+      if (y + rh > list_top + list_h) {
+        more_below = true;
+        break;
+      }
+      const int sel = menu_sel_index();
+      uint32_t col = (i == sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
+      if (i == sel)
+        fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, rh, 0xFF203040);
+      if (sub) {
         if (submenu_row_is_back(i)) {
           draw_text(fb, amiga::FB_W, box_x + 12, y, "Back", col);
         } else if (submenu_row_is_new(i)) {
@@ -896,24 +905,22 @@ public:
           SlotLabel lab = format_slot_label(slot, submenu == SubMenu::Save);
           draw_text(fb, amiga::FB_W, box_x + 12, y, lab.line1.c_str(), col);
           draw_text(fb, amiga::FB_W, box_x + 12, y + 10, lab.line2.c_str(),
-                    (i == submenu_sel) ? 0xFFC0C080 : 0xFFA0A0A0);
+                    (i == sel) ? 0xFFC0C080 : 0xFFA0A0A0);
         }
-        y += rh;
-      }
-      if (submenu == SubMenu::Load && slots.empty()) {
-        draw_text(fb, amiga::FB_W, box_x + 12, box_y + 30 + 14, "(no saves yet)", 0xFF808890);
-      }
-    } else {
-      for (int i = 0; i < MI_COUNT; ++i) {
-        int y = box_y + 30 + i * 12;
-        uint32_t col = (i == menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
-        if (i == menu_sel)
-          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
+      } else {
         char line[64];
         std::snprintf(line, sizeof(line), "%s", menu_label(i, fast));
         draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
       }
+      y += rh;
     }
+    if (sub && submenu == SubMenu::Load && existing_slots().empty()) {
+      draw_text(fb, amiga::FB_W, box_x + 12, list_top + 14, "(no saves yet)", 0xFF808890);
+    }
+    if (more_above)
+      draw_text(fb, amiga::FB_W, box_x + box_w - 20, box_y + 18, "^", 0xFF80C0FF);
+    if (more_below)
+      draw_text(fb, amiga::FB_W, box_x + box_w - 20, box_y + box_h - 24, "v", 0xFF80C0FF);
 
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 14,
               sub ? "Up/Down  A/Return  Esc/B Back" : "Up/Down  A/Return  Back",
