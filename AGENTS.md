@@ -154,3 +154,12 @@ cmake -B build && cmake --build build
 - See TODO.md for status and next steps.
 - Re-run `tests/run_scenarios.sh` after changes to the machine and look at
   the screenshots.
+
+## Packaging (gamepkgstd)
+
+Follow [gamepkgstd](https://github.com/Grumbel/gamepkgstd): `VERSION` is the
+only version source; `flake.nix` is the authoritative build; develop shell
+provides `hostages-configure` / `hostages-build` / `hostages-run`. Writable
+saves and the written disk live under `$XDG_STATE_HOME/hostages` (legacy
+`$XDG_DATA_HOME/hostages` is reused if it already exists). ADFs are not
+redistributable; Linux desktop is the declared packaging target.

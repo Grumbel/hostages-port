@@ -41,23 +41,45 @@ One of the two disk images (not included). The game looks for them in the
 current directory, `assets/` and the install data dir, or the ADF can be
 given on the command line.
 
+## Support matrix
+
+| Target | Status | Notes |
+|--------|--------|-------|
+| Linux x86_64 / aarch64 (SDL2) | Supported | Primary development and packaging target |
+| Windows / WASM / Android / R36S | N/A | Not declared; ADF + full machine state make handheld/web packaging non-goals for now |
+
+Version source: top-level `VERSION` (`0.1.0-dev` in tree). Nix development builds append `.<revCount>+g<rev>`.
+
 ## Build
 
 ```bash
-nix develop          # or: install cmake, a C++20 compiler and SDL2
-cmake -B build
-cmake --build build
+nix develop
+hostages-configure && hostages-build
+hostages-run [disk.adf]          # or: hostages-run-gdb
+# in-tree still works:
+cmake -B build && cmake --build build
 ./build/hostages
 ```
 
-or `nix build && ./result/bin/hostages "Hostage (Infogrames).adf"`.
+Package / one-shot:
+
+```bash
+nix build            # result/bin/hostages
+nix build .#checks.version
+nix run . -- --version
+```
+
+Requires one of the two non-redistributable ADF images (see above).
 
 ## Running
 
 ```
 hostages [options] [disk.adf]
   --scale N        window scale (default 3)
-  --save DIR       directory for the written disk (default $XDG_DATA_HOME/hostages)
+  --save DIR       written disk + save states (default $XDG_STATE_HOME/hostages;
+                   falls back to $XDG_DATA_HOME/hostages if present)
+  -V, --version    print version
+  --show-paths     print resolved paths and exit
   --speed X        CPU speed multiplier (default 1 = A500)
   --protection     keep the manual word check
   --skip-codes     accept any rank access code

@@ -1067,6 +1067,10 @@ public:
   }
 };
 
+#ifndef HOSTAGES_VERSION
+#define HOSTAGES_VERSION "unknown"
+#endif
+
 void usage() {
   fprintf(stderr,
           "usage: hostages [options] [disk.adf]\n"
@@ -1077,8 +1081,12 @@ void usage() {
           "                   \"Hostage (Infogrames).adf\" in ., assets/ or the\n"
           "                   install data dir\n"
           "  --scale N        window scale (default 3)\n"
-          "  --save DIR       directory for the written disk (game saves)\n"
-          "                   (default: $XDG_DATA_HOME/hostages)\n"
+          "  --save DIR       directory for the written disk and save states\n"
+          "                   (default: $XDG_STATE_HOME/hostages; falls back to\n"
+          "                   $XDG_DATA_HOME/hostages if that already exists)\n"
+          "  --user-data-dir DIR  alias for --save (gamepkgstd path vocabulary)\n"
+          "  --data-dir DIR   extra search root for installed/read-only assets\n"
+          "                   (ADF lookup; default install datadir is always tried)\n"
           "  --speed X        CPU speed multiplier (default 1 = A500)\n"
           "  --verbose        log OS calls\n"
           "  --trace          trace every instruction (very slow)\n"
@@ -1092,6 +1100,9 @@ void usage() {
           "  --ram-hash N     log a RAM hash every N frames\n"
           "  --script FILE    scripted input (see source)\n"
           "  --grab           capture the mouse at start (F12 toggles)\n"
+          "  -V, --version    print version and exit\n"
+          "  --show-paths     print resolved data/save paths and exit\n"
+          "  -h, --help       this help\n"
           "keys: cursor keys/right Ctrl = joystick, F11 fullscreen,\n"
           "      Pause fast-forward, F9 debug menu; all other keys to game.\n"
           "pad:  stick/D-pad = joystick, A = fire, B = Esc, X = Return,\n"
@@ -1102,7 +1113,7 @@ void usage() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string adf_path, save_dir;
+  std::string adf_path, save_dir, data_dir;
   int scale = 3;
   double speed = 1.0;
   bool verbose = false, trace = false, fast = false, protection = false, skip_codes = false;
@@ -1110,6 +1121,7 @@ int main(int argc, char** argv) {
   std::string shot_path, script_path, wav_path, coverage_path;
   int ram_hash = 0;
   bool grab_mouse = false;
+  bool show_paths = false;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--scale" && i + 1 < argc) scale = std::atoi(argv[++i]);
@@ -1127,12 +1139,48 @@ int main(int argc, char** argv) {
     else if (a == "--ram-hash" && i + 1 < argc) ram_hash = std::atoi(argv[++i]);
     else if (a == "--script" && i + 1 < argc) script_path = argv[++i];
     else if (a == "--grab") grab_mouse = true;
+    else if (a == "--user-data-dir" && i + 1 < argc) save_dir = argv[++i];
+    else if (a == "--data-dir" && i + 1 < argc) data_dir = argv[++i];
+    else if (a == "-V" || a == "--version") {
+      printf("hostages %s\n", HOSTAGES_VERSION);
+      return 0;
+    }
+    else if (a == "--show-paths") show_paths = true;
     else if (a == "-h" || a == "--help") { usage(); return 0; }
+    else if (a[0] == '-') {
+      fprintf(stderr, "unknown option: %s\n", a.c_str());
+      usage();
+      return 1;
+    }
     else adf_path = a;
   }
+  // Writable state: prefer XDG_STATE_HOME; if an older XDG_DATA_HOME tree already
+  // exists, keep using it so existing saves and written disks are not abandoned.
+  auto xdg_subdir = [](const char* env, const char* fallback_under_home) -> std::string {
+    const char* v = getenv(env);
+    if (v && v[0] == '/') return std::string(v) + "/hostages";
+    const char* home = getenv("HOME");
+    if (home && *home) return std::string(home) + fallback_under_home;
+    return {};
+  };
+  if (save_dir.empty()) {
+    std::string state = xdg_subdir("XDG_STATE_HOME", "/.local/state/hostages");
+    std::string legacy = xdg_subdir("XDG_DATA_HOME", "/.local/share/hostages");
+    if (!legacy.empty() && std::filesystem::exists(legacy))
+      save_dir = legacy;
+    else if (!state.empty())
+      save_dir = state;
+    else
+      save_dir = ".";
+  }
+
+  std::vector<std::string> search_roots = {".", "assets"};
+  if (!data_dir.empty()) search_roots.push_back(data_dir);
+  search_roots.push_back(HOSTAGES_DATADIR);
+
   if (adf_path.empty()) {
     // Prefer the European AmigaDOS release; fall back to the trackloader disk.
-    for (std::string cand : {std::string("."), std::string("assets"), std::string(HOSTAGES_DATADIR)}) {
+    for (const std::string& cand : search_roots) {
       for (const char* name :
            {"Hostages (1988)(Infogrames)[cr].adf", "Hostages (1988)(Infogrames).adf",
             "Hostage (Infogrames).adf"}) {
@@ -1142,17 +1190,18 @@ int main(int argc, char** argv) {
       if (!adf_path.empty()) break;
     }
   }
+  if (show_paths) {
+    printf("version: %s\n", HOSTAGES_VERSION);
+    printf("data-dir (install): %s\n", HOSTAGES_DATADIR);
+    if (!data_dir.empty()) printf("data-dir (extra): %s\n", data_dir.c_str());
+    printf("save-dir: %s\n", save_dir.c_str());
+    printf("adf: %s\n", adf_path.empty() ? "(not found)" : adf_path.c_str());
+    return adf_path.empty() ? 1 : 0;
+  }
   if (adf_path.empty()) {
     fprintf(stderr, "Cannot find the game disk.\n");
     usage();
     return 1;
-  }
-  if (save_dir.empty()) {
-    const char* xdg = getenv("XDG_DATA_HOME");
-    const char* home = getenv("HOME");
-    if (xdg && *xdg) save_dir = std::string(xdg) + "/hostages";
-    else if (home) save_dir = std::string(home) + "/.local/share/hostages";
-    else save_dir = ".";
   }
 
   amiga::Machine machine;
