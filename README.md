@@ -43,12 +43,15 @@ given on the command line.
 
 ## Support matrix
 
-| Target | Status | Notes |
-|--------|--------|-------|
-| Linux x86_64 / aarch64 (SDL2) | Supported | Primary development and packaging target |
-| Windows / WASM / Android / R36S | N/A | Not declared; ADF + full machine state make handheld/web packaging non-goals for now |
+| Target | Artifact | Command |
+|--------|----------|---------|
+| Linux desktop (SDL2) | package + `.desktop` / AppStream | `nix build` / `nix run` |
+| Windows x86_64 / i686 | folder or zip (MinGW + SDL2.dll) | `nix build .#hostages-win64` / `.#hostages-win64-zip` |
+| WebAssembly | static site (html/js/wasm) | `nix build .#hostages-wasm` / `nix run .#hostages-wasm` |
+| R36S / ArkOS (PortMaster) | port tree or zip | `nix build .#hostages-r36s-portmaster` / `.#hostages-r36s-portmaster-zip` |
+| Android | signed debug APK | `nix build .#hostages-android` / `nix run .#hostages-android-install` |
 
-Version source: top-level `VERSION` (`0.1.0-dev` in tree). Nix development builds append `.<revCount>+g<rev>`.
+All targets require a **user-supplied, non-redistributable ADF**. Version source: top-level `VERSION` (`0.1.0-dev`); Nix development builds append `.<revCount>+g<rev>`.
 
 ## Build
 
@@ -64,9 +67,13 @@ cmake -B build && cmake --build build
 Package / one-shot:
 
 ```bash
-nix build            # result/bin/hostages
+nix build                         # Linux: result/bin/hostages + desktop files
 nix build .#checks.version
 nix run . -- --version
+nix build .#hostages-win64-zip
+nix build .#hostages-wasm
+nix build .#hostages-r36s-portmaster-zip
+nix build .#hostages-android
 ```
 
 Requires one of the two non-redistributable ADF images (see above).

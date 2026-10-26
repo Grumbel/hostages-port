@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Hostages</title>
+  <style>
+    html, body { margin: 0; background: #111; color: #ddd; font-family: system-ui, sans-serif; }
+    #canvas { display: block; margin: 1rem auto; background: #000; max-width: 100%; }
+    .note { max-width: 40rem; margin: 0 auto 1rem; padding: 0 1rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <p class="note">Hostages (Amiga port). Provide an ADF via the file picker if prompted,
+  or place it in the virtual filesystem. Saves use browser persistent storage when available.</p>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  <script>
+    var Module = {
+      canvas: (function() { return document.getElementById('canvas'); })(),
+      locateFile: function(path) { return path; }
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

@@ -109,6 +109,9 @@ public:
   void set_host(Host* h) { host_ = h; }
   // Run until QuitRequested is thrown by the host.
   int run();
+  // Advance exactly one PAL frame (or present while debug-paused).
+  // Returns false when the machine has quit.
+  bool step_frame();
 
   // ---- memory helpers for HLE code -------------------------------------
   uint8_t r8(uint32_t a) { return read8(a); }

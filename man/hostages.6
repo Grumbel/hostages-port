@@ -1,0 +1,40 @@
+.\" SPDX-FileCopyrightText: 2025–2026 Ingo Ruhnke <grumbel@gmail.com>
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH HOSTAGES 6 "October 2026" "hostages" "Games"
+.SH NAME
+hostages \- port of the Amiga version of Hostages (Infogrames, 1988)
+.SH SYNOPSIS
+.B hostages
+[\fIoptions\fR] [\fIdisk.adf\fR]
+.SH DESCRIPTION
+Runs the original Amiga Hostages executables on an emulated A500. The game
+disk image is not redistributable and must be supplied by the user.
+.SH OPTIONS
+.TP
+.B \-V, \-\-version
+Print version and exit.
+.TP
+.B \-\-show\-paths
+Print resolved data and save directories and exit.
+.TP
+.B \-\-save \fIDIR\fR, \-\-user\-data\-dir \fIDIR\fR
+Directory for the written disk image and save states
+(default: $XDG_STATE_HOME/hostages on Linux).
+.TP
+.B \-\-data\-dir \fIDIR\fR
+Extra search root for ADF images.
+.TP
+.B \-\-scale \fIN\fR
+Window scale factor (default 3).
+.TP
+.B \-\-help
+Show help.
+.SH FILES
+Writable state is stored under the save directory (written ADF copy and
+.I states/
+slots). ADF images are searched in the current directory,
+.IR assets/ ,
+and the install data directory.
+.SH SEE ALSO
+Project documentation:
+.I https://github.com/Grumbel/hostages-port

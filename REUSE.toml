@@ -4,6 +4,14 @@
 version = 1
 
 [[annotations]]
-path = ["VERSION", "flake.lock", "tests/scenarios/**"]
+path = [
+  "VERSION",
+  "flake.lock",
+  "tests/scenarios/**",
+  "data/**",
+  "man/**",
+  "mk/**",
+  "nix/**",
+]
 SPDX-FileCopyrightText = "Copyright 2025–2026 Ingo Ruhnke <grumbel@gmail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"

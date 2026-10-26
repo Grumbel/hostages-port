@@ -162,4 +162,4 @@ only version source; `flake.nix` is the authoritative build; develop shell
 provides `hostages-configure` / `hostages-build` / `hostages-run`. Writable
 saves and the written disk live under `$XDG_STATE_HOME/hostages` (legacy
 `$XDG_DATA_HOME/hostages` is reused if it already exists). ADFs are not
-redistributable; Linux desktop is the declared packaging target.
+redistributable; Packaging targets: Linux desktop, Windows (MinGW), WASM, R36S/PortMaster, Android APK. ADFs are not redistributable.

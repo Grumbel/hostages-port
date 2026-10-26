@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025–2026 Ingo Ruhnke <grumbel@gmail.com>
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Hostages
+GenericName=Amiga Hostages port
+Comment=Play the Amiga version of Hostages (Infogrames, 1988) on modern systems
+Exec=hostages
+Icon=hostages
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=amiga;hostages;infogrames;emulator;port;
+StartupNotify=true

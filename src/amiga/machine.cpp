@@ -378,26 +378,34 @@ void Machine::execute(int64_t until) {
   }
 }
 
-int Machine::run() {
+bool Machine::step_frame() {
   try {
-    for (;;) {
-      if (debug_pause) {
-        // Present the last frame so the host can draw its overlay; do not
-        // advance the CPU or chipset.
-        if (host_) {
-          host_->frame(view_.data());
-          host_->audio(audio_buf_.data(), audio_buf_.size() / 2);
-        }
-        audio_buf_.clear();
-        continue;
+    if (debug_pause) {
+      // Present the last frame so the host can draw its overlay; do not
+      // advance the CPU or chipset.
+      if (host_) {
+        host_->frame(view_.data());
+        host_->audio(audio_buf_.data(), audio_buf_.size() / 2);
       }
+      audio_buf_.clear();
+      return true;
+    }
+    const uint64_t start = frame_count_;
+    while (frame_count_ == start) {
       execute(line_start_ + line_cycles_);
       if (cpu.cycles >= line_start_ + line_cycles_) run_line();
     }
+    return true;
   } catch (QuitRequested&) {
+    disk.flush();
+    write_coverage();
+    return false;
   }
-  disk.flush();
-  write_coverage();
+}
+
+int Machine::run() {
+  while (step_frame()) {
+  }
   return 0;
 }
 

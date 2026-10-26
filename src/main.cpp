@@ -2,6 +2,9 @@
 #include "amiga/machine.hpp"
 
 #include <SDL.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -953,6 +956,8 @@ public:
     handle_events();
     if (quit) throw amiga::QuitRequested{};
     // Pace to the PAL frame rate unless fast-forwarding.
+    // On the web the browser owns the schedule; do not block.
+#ifndef __EMSCRIPTEN__
     uint64_t freq = SDL_GetPerformanceFrequency();
     next_frame += uint64_t(double(freq) / amiga::FRAME_HZ);
     uint64_t now = SDL_GetPerformanceCounter();
@@ -964,6 +969,7 @@ public:
       int64_t left_us = left * 1000000 / int64_t(freq);
       if (left_us > 2000) SDL_Delay(uint32_t(left_us / 1000 - 1));
     }
+#endif
   }
 
   void run_script() {
@@ -1154,16 +1160,28 @@ int main(int argc, char** argv) {
     }
     else adf_path = a;
   }
-  // Writable state: prefer XDG_STATE_HOME; if an older XDG_DATA_HOME tree already
-  // exists, keep using it so existing saves and written disks are not abandoned.
-  auto xdg_subdir = [](const char* env, const char* fallback_under_home) -> std::string {
-    const char* v = getenv(env);
-    if (v && v[0] == '/') return std::string(v) + "/hostages";
-    const char* home = getenv("HOME");
-    if (home && *home) return std::string(home) + fallback_under_home;
-    return {};
-  };
   if (save_dir.empty()) {
+#if defined(_WIN32) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+    // SDL owns the directory layout on these platforms (IDBFS on the web).
+    char* pref = SDL_GetPrefPath("grumbel", "hostages");
+    if (pref && pref[0]) {
+      save_dir = pref;
+      // drop trailing separator for consistent path joins
+      while (!save_dir.empty() && (save_dir.back() == '/' || save_dir.back() == '\\'))
+        save_dir.pop_back();
+    }
+    if (pref) SDL_free(pref);
+    if (save_dir.empty()) save_dir = ".";
+#else
+    // Prefer XDG_STATE_HOME; if an older XDG_DATA_HOME tree already exists,
+    // keep using it so existing saves and written disks are not abandoned.
+    auto xdg_subdir = [](const char* env, const char* fallback_under_home) -> std::string {
+      const char* v = getenv(env);
+      if (v && v[0] == '/') return std::string(v) + "/hostages";
+      const char* home = getenv("HOME");
+      if (home && *home) return std::string(home) + fallback_under_home;
+      return {};
+    };
     std::string state = xdg_subdir("XDG_STATE_HOME", "/.local/state/hostages");
     std::string legacy = xdg_subdir("XDG_DATA_HOME", "/.local/share/hostages");
     if (!legacy.empty() && std::filesystem::exists(legacy))
@@ -1172,6 +1190,7 @@ int main(int argc, char** argv) {
       save_dir = state;
     else
       save_dir = ".";
+#endif
   }
 
   std::vector<std::string> search_roots = {".", "assets"};
@@ -1228,8 +1247,21 @@ int main(int argc, char** argv) {
   if (grab_mouse) host.set_grab(true);
   machine.set_host(&host);
   if (!wav_path.empty()) host.open_wav(wav_path);
+#ifdef __EMSCRIPTEN__
+  // Keep host and machine alive for the browser's main loop.
+  static amiga::Machine* g_machine = &machine;
+  static SdlHost* g_host = &host;
+  emscripten_set_main_loop([] {
+    if (!g_machine->step_frame()) {
+      g_host->close_wav();
+      emscripten_cancel_main_loop();
+    }
+  }, 0, 1);
+  return 0;
+#else
   machine.run();
   host.close_wav();
   SDL_Quit();
   return 0;
+#endif
 }

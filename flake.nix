@@ -7,12 +7,32 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+
+    SDL2-win32.url = "github:grumnix/SDL2-win32";
+    SDL2-win32.inputs.nixpkgs.follows = "nixpkgs";
+    SDL2-win32.inputs.flake-utils.follows = "flake-utils";
+
+    arkos-sysroot = {
+      url = "github:grumnix/arkos-sysroot";
+      flake = false;
+    };
+
+    sdl2-src = {
+      url = "https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, SDL2-win32, arkos-sysroot, sdl2-src }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+            android_sdk.accept_license = true;
+          };
+        };
         lib = pkgs.lib;
 
         versionBase = lib.strings.fileContents ./VERSION;
@@ -29,21 +49,14 @@
           inherit version;
           src = lib.cleanSource ./.;
 
-          nativeBuildInputs = with pkgs; [
-            cmake
-            pkg-config
-          ];
-
-          buildInputs = with pkgs; [
-            SDL2
-          ];
+          nativeBuildInputs = with pkgs; [ cmake pkg-config ];
+          buildInputs = with pkgs; [ SDL2 ];
 
           cmakeFlags = [
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
             "-DPROJECT_VERSION_FULL=${version}"
           ];
 
-          # Keep symbols for debugging out of the store path
           dontStrip = true;
           separateDebugInfo = false;
 
@@ -55,17 +68,95 @@
             platforms = platforms.linux;
           };
         };
-      in
-      {
-        packages.default = hostages;
-        packages.hostages = hostages;
 
-        apps.default = {
-          type = "app";
-          program = "${hostages}/bin/hostages";
+        windows = import ./nix/windows.nix {
+          inherit pkgs version;
+          sdl2Win64 = SDL2-win32.packages.${system}.SDL2-win64;
+          sdl2Win32 = SDL2-win32.packages.${system}.SDL2-win32;
         };
 
-        # Lightweight version smoke check (does not need an ADF).
+        wasm = import ./nix/wasm.nix {
+          inherit pkgs version gitRev;
+          sdlSrc = sdl2-src;
+          sdlVersion = "2.30.3";
+        };
+
+        r36s = import ./nix/r36s.nix {
+          inherit (pkgs) lib stdenv stdenvNoCC cmake pkg-config writeShellScript zip pkgsCross;
+          sysrootSrc = arkos-sysroot;
+          sysrootOverride =
+            let p = builtins.getEnv "HOSTAGES_ARKOS_SYSROOT";
+            in if p == "" then null else builtins.storePath p;
+        };
+
+        hostagesR36s = r36s.mkHostagesR36s {
+          src = lib.cleanSource ./.;
+          inherit version;
+        };
+        hostagesR36sPortMaster = r36s.mkHostagesR36sPortMaster {
+          r36sPkg = hostagesR36s;
+          inherit version;
+        };
+
+        androidSdk = (pkgs.androidenv.composeAndroidPackages {
+          cmdLineToolsVersion = "11.0";
+          toolsVersion = "26.1.1";
+          platformToolsVersion = "34.0.5";
+          buildToolsVersions = [ "34.0.0" ];
+          includeEmulator = false;
+          platformVersions = [ "34" "21" ];
+          includeSources = false;
+          includeSystemImages = false;
+          includeNDK = true;
+          ndkVersions = [ "26.3.11579264" ];
+          useGoogleAPIs = false;
+        }).androidsdk;
+
+        android = import ./nix/android.nix {
+          inherit pkgs version androidSdk;
+          sdlSrc = sdl2-src;
+          sdlVersion = "2.30.3";
+          buildToolsVersion = "34.0.0";
+          packagePlatform = "21";
+          compilePlatform = "34";
+          targetAbis = [ "armeabi-v7a" "arm64-v8a" ];
+          versionCode = 1;
+        };
+
+      in
+      {
+        packages = {
+          default = hostages;
+          hostages = hostages;
+
+          hostages-win64 = windows.hostages-win64;
+          hostages-win32 = windows.hostages-win32;
+          hostages-win64-zip = windows.hostages-win64-zip;
+          hostages-win32-zip = windows.hostages-win32-zip;
+
+          hostages-wasm = wasm.hostagesWasm;
+          sdl2-wasm = wasm.sdl2Wasm;
+
+          arkos-sysroot = r36s.arkosSysroot;
+          hostages-r36s = hostagesR36s;
+          hostages-r36s-portmaster = hostagesR36sPortMaster;
+          hostages-r36s-portmaster-zip = r36s.mkHostagesR36sPortMasterZip {
+            portMasterPkg = hostagesR36sPortMaster;
+            inherit version;
+          };
+
+          hostages-android = android.apk;
+        };
+
+        apps = {
+          default = {
+            type = "app";
+            program = "${hostages}/bin/hostages";
+          };
+          hostages-wasm = wasm.serveApp;
+          hostages-android-install = android.installApp;
+        };
+
         checks.version = pkgs.runCommand "hostages-version" {
           nativeBuildInputs = [ hostages ];
         } ''
@@ -73,6 +164,8 @@
           echo "$outv" | grep -F "${version}"
           hostages --help >/dev/null
           hostages --show-paths >/dev/null || true
+          test -f ${hostages}/share/applications/hostages.desktop
+          test -f ${hostages}/share/metainfo/org.grumbel.Hostages.metainfo.xml
           touch $out
         '';
 
@@ -85,7 +178,6 @@
             python3
             xxd
             file
-            # m68k objdump for tools/disasm.py
             pkgsCross.m68k.buildPackages.binutils
             (writeShellScriptBin "hostages-configure" ''
               set -euo pipefail
@@ -167,7 +259,7 @@ except Exception:
             export HOSTAGES_VERSION_FULL="${version}"
             echo "Hostages develop shell (version ${version})"
             echo "  hostages-configure | hostages-build | hostages-run | hostages-run-gdb"
-            echo "  cmake -B build && cmake --build build   # in-tree still works"
+            echo "  packages: hostages hostages-win64 hostages-wasm hostages-r36s hostages-android"
           '';
         };
       });

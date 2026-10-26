@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.grumbel.hostages"
+    android:versionCode="@VERSION_CODE@"
+    android:versionName="@VERSION_NAME@">
+  <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34"/>
+  <uses-feature android:glEsVersion="0x00020000" android:required="false"/>
+  <application android:label="Hostages"
+      android:icon="@mipmap/ic_launcher"
+      android:hasCode="true"
+      android:extractNativeLibs="true">
+    <activity android:name="org.libsdl.app.SDLActivity"
+        android:label="Hostages"
+        android:exported="true"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+        android:screenOrientation="landscape">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
