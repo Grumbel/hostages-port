@@ -9,7 +9,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
+#include <sys/stat.h>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -280,6 +282,27 @@ public:
     return save_dir + "/states/slot" + std::to_string(slot) + ".sav";
   }
 
+  std::string slot_meta_path(int slot) const {
+    return save_dir + "/states/slot" + std::to_string(slot) + ".meta";
+  }
+
+  // Compact label lines for a save slot (drawn as two rows in the submenu).
+  struct SlotLabel {
+    std::string line1;  // e.g. "#3  S1  CAPT  10-26 14:32"
+    std::string line2;  // e.g. "dead:ECHO" or "team OK"
+  };
+
+  // Snapshot of game-relevant fields written beside the .sav file.
+  struct SlotMeta {
+    std::string program;   // apro1. / it.
+    int stage = 0;         // 1, 2, or 0 unknown
+    std::string rank;      // CAPTAIN, …
+    std::string mission;   // ASSAULT, JUPITER, …
+    std::string team;      // per-member: A/T/U/D (alive/target/unspawned/dead)
+    std::string dead;      // comma-separated short names of dead members
+    std::string time;      // local "YYYY-MM-DD HH:MM"
+  };
+
   // Occupied slot numbers in ascending order (files under states/).
   std::vector<int> existing_slots() const {
     std::vector<int> out;
@@ -308,12 +331,10 @@ public:
     return 0;
   }
 
-  // Returns true if row is the Back entry.
   bool submenu_row_is_back(int row) const {
     return row == submenu_row_count() - 1;
   }
 
-  // Returns true if row is "New save" on the Save submenu.
   bool submenu_row_is_new(int row) const {
     if (submenu != SubMenu::Save) return false;
     const int n = int(existing_slots().size());
@@ -321,11 +342,16 @@ public:
     return row == n;
   }
 
-  // Slot number for a slot row, or 0 if not a slot row.
   int submenu_row_slot(int row) const {
     auto slots = existing_slots();
     if (row >= 0 && row < int(slots.size())) return slots[size_t(row)];
     return 0;
+  }
+
+  // Pixel height of one selectable row (slot entries use two text lines).
+  int submenu_row_height(int row) const {
+    if (submenu_row_is_back(row) || submenu_row_is_new(row)) return 12;
+    return 22;  // two lines of 5×7 text + gap
   }
 
   void open_submenu(SubMenu which) {
@@ -336,6 +362,190 @@ public:
   void close_submenu() {
     submenu = SubMenu::None;
     submenu_sel = 0;
+  }
+
+  // Best-effort rank/mission: first match of known tokens in chip RAM.
+  static std::string scan_chip_token(amiga::Machine* m, const char* const* tokens, int ntok) {
+    if (!m) return {};
+    for (int t = 0; t < ntok; ++t) {
+      const char* tok = tokens[t];
+      const size_t len = std::strlen(tok);
+      if (len == 0 || len > 32) continue;
+      for (uint32_t a = 0; a + len < amiga::CHIP_SIZE; ++a) {
+        bool ok = true;
+        for (size_t i = 0; i < len; ++i) {
+          if (char(m->r8(a + uint32_t(i))) != tok[i]) { ok = false; break; }
+        }
+        if (ok) return tok;
+      }
+    }
+    return {};
+  }
+
+  SlotMeta collect_slot_meta() const {
+    SlotMeta meta;
+    {
+      std::time_t now = std::time(nullptr);
+      std::tm tm{};
+#if defined(_WIN32)
+      localtime_s(&tm, &now);
+#else
+      localtime_r(&now, &tm);
+#endif
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
+                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+      meta.time = buf;
+    }
+    if (!machine) return meta;
+    meta.program = machine->program_name();
+    if (meta.program == "apro1.") meta.stage = 1;
+    else if (meta.program == "it.") meta.stage = 2;
+
+    static const char* ranks[] = {"COMMANDER", "CAPTAIN", "LIEUTENANT", "SERGEANT"};
+    static const char* missions[] = {"JUPITER", "ASSAULT", "EMBASSY"};
+    meta.rank = scan_chip_token(machine, ranks, 4);
+    meta.mission = scan_chip_token(machine, missions, 3);
+
+    const int n = (meta.stage == 2) ? kTeamCountStage2
+                : (meta.stage == 1) ? kTeamCountStage1 : 0;
+    meta.team.resize(size_t(n), '?');
+    for (int i = 0; i < n; ++i) {
+      TeamState st = team_member_state(i);
+      char c = 'U';
+      switch (st) {
+        case TS_ALIVE: c = 'A'; break;
+        case TS_ON_TARGET: c = 'T'; break;
+        case TS_UNSPAWNED: c = 'U'; break;
+        case TS_DEAD: c = 'D'; break;
+      }
+      meta.team[size_t(i)] = c;
+      if (st == TS_DEAD) {
+        if (!meta.dead.empty()) meta.dead += ',';
+        // Compact name: first letter of team code
+        meta.dead += kTeamNames[i][0];
+        // Prefer full short name if room allows later; store letter for compact UI
+      }
+    }
+    return meta;
+  }
+
+  void write_slot_meta(int slot, const SlotMeta& meta) const {
+    std::filesystem::create_directories(save_dir + "/states");
+    FILE* f = std::fopen(slot_meta_path(slot).c_str(), "w");
+    if (!f) return;
+    std::fprintf(f, "v=1\n");
+    std::fprintf(f, "program=%s\n", meta.program.c_str());
+    std::fprintf(f, "stage=%d\n", meta.stage);
+    std::fprintf(f, "rank=%s\n", meta.rank.c_str());
+    std::fprintf(f, "mission=%s\n", meta.mission.c_str());
+    std::fprintf(f, "team=%s\n", meta.team.c_str());
+    std::fprintf(f, "dead=%s\n", meta.dead.c_str());
+    std::fprintf(f, "time=%s\n", meta.time.c_str());
+    std::fclose(f);
+  }
+
+  SlotMeta read_slot_meta(int slot) const {
+    SlotMeta meta;
+    FILE* f = std::fopen(slot_meta_path(slot).c_str(), "r");
+    if (!f) {
+      // No sidecar: show file mtime only.
+      struct stat st {};
+      if (stat(slot_path(slot).c_str(), &st) == 0) {
+        std::tm tm{};
+#if defined(_WIN32)
+        localtime_s(&tm, &st.st_mtime);
+#else
+        localtime_r(&st.st_mtime, &tm);
+#endif
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
+                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+        meta.time = buf;
+      }
+      return meta;
+    }
+    char line[128];
+    while (std::fgets(line, sizeof(line), f)) {
+      char* nl = std::strchr(line, '\n');
+      if (nl) *nl = 0;
+      char* eq = std::strchr(line, '=');
+      if (!eq) continue;
+      *eq = 0;
+      const char* key = line;
+      const char* val = eq + 1;
+      if (std::strcmp(key, "program") == 0) meta.program = val;
+      else if (std::strcmp(key, "stage") == 0) meta.stage = std::atoi(val);
+      else if (std::strcmp(key, "rank") == 0) meta.rank = val;
+      else if (std::strcmp(key, "mission") == 0) meta.mission = val;
+      else if (std::strcmp(key, "team") == 0) meta.team = val;
+      else if (std::strcmp(key, "dead") == 0) meta.dead = val;
+      else if (std::strcmp(key, "time") == 0) meta.time = val;
+    }
+    std::fclose(f);
+    return meta;
+  }
+
+  static std::string abbreviate_rank(const std::string& r) {
+    if (r == "COMMANDER") return "CMD";
+    if (r == "CAPTAIN") return "CAPT";
+    if (r == "LIEUTENANT") return "LT";
+    if (r == "SERGEANT") return "SGT";
+    return r;
+  }
+
+  SlotLabel format_slot_label(int slot, bool overwrite) const {
+    SlotMeta m = read_slot_meta(slot);
+    SlotLabel lab;
+    char l1[48];
+    // "#3 S1 CAPT" + time on the right when it fits
+    char stage[8] = "";
+    if (m.stage == 1) std::snprintf(stage, sizeof(stage), "S1");
+    else if (m.stage == 2) std::snprintf(stage, sizeof(stage), "S2");
+    else if (!m.program.empty()) {
+      // Truncate program name
+      std::snprintf(stage, sizeof(stage), "%.4s", m.program.c_str());
+    }
+    const char* rank = m.rank.empty() ? "" : abbreviate_rank(m.rank).c_str();
+    const char* miss = m.mission.empty() ? "" : m.mission.c_str();
+    // Prefer rank over mission on line 1 if both present; mission goes to line 2.
+    if (overwrite)
+      std::snprintf(l1, sizeof(l1), "Rep #%d %s %s", slot, stage, rank);
+    else
+      std::snprintf(l1, sizeof(l1), "#%d %s %s", slot, stage, rank);
+    // Append short time (MM-DD HH:MM) if space remains (≈40 cols at 6px).
+    if (!m.time.empty()) {
+      std::string tshort = m.time;
+      // "YYYY-MM-DD HH:MM" -> "MM-DD HH:MM"
+      if (tshort.size() >= 16) tshort = tshort.substr(5);
+      char with_time[48];
+      std::snprintf(with_time, sizeof(with_time), "%s  %s", l1, tshort.c_str());
+      if (std::strlen(with_time) <= 36)
+        std::snprintf(l1, sizeof(l1), "%s", with_time);
+    }
+    lab.line1 = l1;
+
+    char l2[48];
+    l2[0] = 0;
+    if (!m.dead.empty())
+      std::snprintf(l2, sizeof(l2), "dead:%s", m.dead.c_str());
+    else if (!m.team.empty()) {
+      // Show team letter strip: DEM… with lowercased dead already in dead field
+      std::snprintf(l2, sizeof(l2), "team:%s", m.team.c_str());
+    }
+    if (miss[0]) {
+      if (l2[0]) {
+        char both[48];
+        std::snprintf(both, sizeof(both), "%s %s", l2, miss);
+        if (std::strlen(both) <= 36)
+          std::snprintf(l2, sizeof(l2), "%s", both);
+      } else {
+        std::snprintf(l2, sizeof(l2), "%s", miss);
+      }
+    }
+    if (!l2[0]) std::snprintf(l2, sizeof(l2), "-");
+    lab.line2 = l2;
+    return lab;
   }
 
   void set_status(const std::string& s) {
@@ -625,9 +835,10 @@ public:
   void do_save_slot(int slot) {
     if (!machine || slot <= 0) return;
     std::filesystem::create_directories(save_dir + "/states");
-    if (machine->save_state(slot_path(slot)))
+    if (machine->save_state(slot_path(slot))) {
+      write_slot_meta(slot, collect_slot_meta());
       set_status("Saved slot " + std::to_string(slot));
-    else
+    } else
       set_status("Save failed");
   }
 
@@ -720,8 +931,14 @@ public:
     }
     const bool sub = submenu != SubMenu::None;
     const int rows = sub ? submenu_row_count() : MI_COUNT;
-    const int box_x = 40, box_y = 20, box_w = 240;
-    const int box_h = std::min(200, 36 + rows * 12 + 20);
+    const int box_x = 28, box_y = 12, box_w = 264;
+    int content_h = 0;
+    if (sub) {
+      for (int i = 0; i < rows; ++i) content_h += submenu_row_height(i);
+    } else {
+      content_h = rows * 12;
+    }
+    const int box_h = std::min(amiga::VIEW_H - 16, 36 + content_h + 22);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40A0FF);
     fill_rect(fb, amiga::FB_W, box_x, box_y + box_h - 1, box_w, 1, 0xFF40A0FF);
@@ -741,27 +958,27 @@ public:
 
     if (sub) {
       auto slots = existing_slots();
+      int y = box_y + 30;
       for (int i = 0; i < rows; ++i) {
-        int y = box_y + 30 + i * 12;
+        const int rh = submenu_row_height(i);
         uint32_t col = (i == submenu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
         if (i == submenu_sel)
-          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
-        char line[64];
+          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, rh, 0xFF203040);
         if (submenu_row_is_back(i)) {
-          std::snprintf(line, sizeof(line), "Back");
+          draw_text(fb, amiga::FB_W, box_x + 12, y, "Back", col);
         } else if (submenu_row_is_new(i)) {
-          std::snprintf(line, sizeof(line), "New save");
+          draw_text(fb, amiga::FB_W, box_x + 12, y, "New save", col);
         } else {
           int slot = submenu_row_slot(i);
-          if (submenu == SubMenu::Save)
-            std::snprintf(line, sizeof(line), "Overwrite slot %d", slot);
-          else
-            std::snprintf(line, sizeof(line), "Slot %d", slot);
+          SlotLabel lab = format_slot_label(slot, submenu == SubMenu::Save);
+          draw_text(fb, amiga::FB_W, box_x + 12, y, lab.line1.c_str(), col);
+          draw_text(fb, amiga::FB_W, box_x + 12, y + 10, lab.line2.c_str(),
+                    (i == submenu_sel) ? 0xFFC0C080 : 0xFFA0A0A0);
         }
-        draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
+        y += rh;
       }
       if (submenu == SubMenu::Load && slots.empty()) {
-        draw_text(fb, amiga::FB_W, box_x + 12, box_y + 30 + 12, "(no saves yet)", 0xFF808890);
+        draw_text(fb, amiga::FB_W, box_x + 12, box_y + 30 + 14, "(no saves yet)", 0xFF808890);
       }
     } else {
       for (int i = 0; i < MI_COUNT; ++i) {
