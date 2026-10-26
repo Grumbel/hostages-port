@@ -83,8 +83,9 @@ Requires one of the two non-redistributable ADF images (see above).
 ```
 hostages [options] [disk.adf]
   --scale N        window scale (default 3)
-  --save DIR       written disk + save states (default $XDG_STATE_HOME/hostages;
+  --state-dir DIR  written disk + save states (default $XDG_STATE_HOME/hostages;
                    falls back to $XDG_DATA_HOME/hostages if present)
+  --save DIR       alias for --state-dir (legacy)
   -V, --version    print version
   --show-paths     print resolved paths and exit
   --speed X        CPU speed multiplier (default 1 = A500)

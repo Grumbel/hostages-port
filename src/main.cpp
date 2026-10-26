@@ -1087,10 +1087,10 @@ void usage() {
           "                   \"Hostage (Infogrames).adf\" in ., assets/ or the\n"
           "                   install data dir\n"
           "  --scale N        window scale (default 3)\n"
-          "  --save DIR       directory for the written disk and save states\n"
+          "  --state-dir DIR  directory for the written disk and save states\n"
           "                   (default: $XDG_STATE_HOME/hostages; falls back to\n"
           "                   $XDG_DATA_HOME/hostages if that already exists)\n"
-          "  --user-data-dir DIR  alias for --save (gamepkgstd path vocabulary)\n"
+          "  --save DIR       alias for --state-dir (legacy)\n"
           "  --data-dir DIR   extra search root for installed/read-only assets\n"
           "                   (ADF lookup; default install datadir is always tried)\n"
           "  --speed X        CPU speed multiplier (default 1 = A500)\n"
@@ -1145,7 +1145,7 @@ int main(int argc, char** argv) {
     else if (a == "--ram-hash" && i + 1 < argc) ram_hash = std::atoi(argv[++i]);
     else if (a == "--script" && i + 1 < argc) script_path = argv[++i];
     else if (a == "--grab") grab_mouse = true;
-    else if (a == "--user-data-dir" && i + 1 < argc) save_dir = argv[++i];
+    else if (a == "--state-dir" && i + 1 < argc) save_dir = argv[++i];
     else if (a == "--data-dir" && i + 1 < argc) data_dir = argv[++i];
     else if (a == "-V" || a == "--version") {
       printf("hostages %s\n", HOSTAGES_VERSION);
@@ -1213,7 +1213,7 @@ int main(int argc, char** argv) {
     printf("version: %s\n", HOSTAGES_VERSION);
     printf("data-dir (install): %s\n", HOSTAGES_DATADIR);
     if (!data_dir.empty()) printf("data-dir (extra): %s\n", data_dir.c_str());
-    printf("save-dir: %s\n", save_dir.c_str());
+    printf("state-dir: %s\n", save_dir.c_str());
     printf("adf: %s\n", adf_path.empty() ? "(not found)" : adf_path.c_str());
     return adf_path.empty() ? 1 : 0;
   }
