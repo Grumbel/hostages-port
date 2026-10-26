@@ -28,6 +28,10 @@ Suggested checks: `nix build .#checks.version`, `.#hostages-win64-zip`,
 - [ ] R36S: device test on ArkOS
 - [ ] Optional: expand CI to optional cross jobs (`workflow_dispatch`)
 
+### UI
+
+- [x] Debug menu Save…/Load… submenus (overwrite / New save)
+
 ## Gameplay / RE (unchanged)
 
 Open: real part I play, part II to ending, handoff at -13218(a4), music

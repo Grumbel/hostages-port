@@ -13,6 +13,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -223,7 +224,11 @@ public:
   // Debug menu (opened with controller Back or F9).
   bool menu_open = false;
   int menu_sel = 0;
-  int save_slot = 1;  // 1..5
+  // Save/Load submenus list on-disk slots; kMaxSlots is the storage ceiling.
+  static constexpr int kMaxSlots = 10;
+  enum class SubMenu { None, Save, Load };
+  SubMenu submenu = SubMenu::None;
+  int submenu_sel = 0;
   std::string save_dir;
   std::string status_msg;
   int status_until = 0;  // frame_no when status_msg clears
@@ -251,7 +256,6 @@ public:
     MI_RESUME = 0,
     MI_SAVE,
     MI_LOAD,
-    MI_SLOT,
     MI_COMPLETE_S1,
     MI_SOFT_RESET,
     MI_SCREENSHOT,
@@ -259,12 +263,11 @@ public:
     MI_COUNT
   };
 
-  static const char* menu_label(int i, int slot, bool fast_on) {
+  static const char* menu_label(int i, bool fast_on) {
     switch (i) {
       case MI_RESUME: return "Resume";
-      case MI_SAVE: return "Save state";
-      case MI_LOAD: return "Load state";
-      case MI_SLOT: return nullptr;  // formatted
+      case MI_SAVE: return "Save...";
+      case MI_LOAD: return "Load...";
       case MI_COMPLETE_S1: return "Complete stage I";
       case MI_SOFT_RESET: return "Soft reset";
       case MI_SCREENSHOT: return "Screenshot";
@@ -277,6 +280,64 @@ public:
     return save_dir + "/states/slot" + std::to_string(slot) + ".sav";
   }
 
+  // Occupied slot numbers in ascending order (files under states/).
+  std::vector<int> existing_slots() const {
+    std::vector<int> out;
+    for (int i = 1; i <= kMaxSlots; ++i) {
+      if (std::filesystem::exists(slot_path(i))) out.push_back(i);
+    }
+    return out;
+  }
+
+  int first_free_slot() const {
+    for (int i = 1; i <= kMaxSlots; ++i) {
+      if (!std::filesystem::exists(slot_path(i))) return i;
+    }
+    return 0;
+  }
+
+  // Save submenu rows: existing slots (overwrite), optional "New save", then Back.
+  // Load submenu rows: existing slots, then Back. Empty load list still has Back.
+  int submenu_row_count() const {
+    const int n = int(existing_slots().size());
+    if (submenu == SubMenu::Save) {
+      const bool can_new = first_free_slot() != 0;
+      return n + (can_new ? 1 : 0) + 1;  // + Back
+    }
+    if (submenu == SubMenu::Load) return n + 1;  // + Back
+    return 0;
+  }
+
+  // Returns true if row is the Back entry.
+  bool submenu_row_is_back(int row) const {
+    return row == submenu_row_count() - 1;
+  }
+
+  // Returns true if row is "New save" on the Save submenu.
+  bool submenu_row_is_new(int row) const {
+    if (submenu != SubMenu::Save) return false;
+    const int n = int(existing_slots().size());
+    if (first_free_slot() == 0) return false;
+    return row == n;
+  }
+
+  // Slot number for a slot row, or 0 if not a slot row.
+  int submenu_row_slot(int row) const {
+    auto slots = existing_slots();
+    if (row >= 0 && row < int(slots.size())) return slots[size_t(row)];
+    return 0;
+  }
+
+  void open_submenu(SubMenu which) {
+    submenu = which;
+    submenu_sel = 0;
+  }
+
+  void close_submenu() {
+    submenu = SubMenu::None;
+    submenu_sel = 0;
+  }
+
   void set_status(const std::string& s) {
     status_msg = s;
     status_until = frame_no + 90;
@@ -286,11 +347,13 @@ public:
     if (char_menu_open) close_char_menu();
     menu_open = true;
     menu_sel = 0;
+    close_submenu();
     if (machine) machine->debug_pause = true;
   }
 
   void close_menu() {
     menu_open = false;
+    close_submenu();
     menu_wait_release = true;
     if (machine && !char_menu_open) machine->debug_pause = false;
   }
@@ -559,29 +622,73 @@ public:
               "Up/Down  A  Y/B", 0xFF607080);
   }
 
+  void do_save_slot(int slot) {
+    if (!machine || slot <= 0) return;
+    std::filesystem::create_directories(save_dir + "/states");
+    if (machine->save_state(slot_path(slot)))
+      set_status("Saved slot " + std::to_string(slot));
+    else
+      set_status("Save failed");
+  }
+
+  void do_load_slot(int slot) {
+    if (!machine || slot <= 0) return;
+    if (machine->load_state(slot_path(slot)))
+      set_status("Loaded slot " + std::to_string(slot));
+    else
+      set_status("Load failed");
+  }
+
+  void activate_submenu() {
+    if (!machine) return;
+    const int n = submenu_row_count();
+    if (submenu_sel < 0 || submenu_sel >= n) return;
+    if (submenu_row_is_back(submenu_sel)) {
+      close_submenu();
+      return;
+    }
+    if (submenu == SubMenu::Save) {
+      if (submenu_row_is_new(submenu_sel)) {
+        int slot = first_free_slot();
+        if (slot == 0) {
+          set_status("No free slots");
+          return;
+        }
+        do_save_slot(slot);
+        close_submenu();
+        return;
+      }
+      int slot = submenu_row_slot(submenu_sel);
+      do_save_slot(slot);
+      close_submenu();
+      return;
+    }
+    if (submenu == SubMenu::Load) {
+      int slot = submenu_row_slot(submenu_sel);
+      if (slot == 0) {
+        set_status("No saves");
+        return;
+      }
+      do_load_slot(slot);
+      close_submenu();
+    }
+  }
+
   void activate_menu() {
     if (!machine) return;
+    if (submenu != SubMenu::None) {
+      activate_submenu();
+      return;
+    }
     switch (menu_sel) {
       case MI_RESUME:
         close_menu();
         break;
-      case MI_SAVE: {
-        std::filesystem::create_directories(save_dir + "/states");
-        std::string p = slot_path(save_slot);
-        if (machine->save_state(p)) set_status("Saved slot " + std::to_string(save_slot));
-        else set_status("Save failed");
+      case MI_SAVE:
+        open_submenu(SubMenu::Save);
         break;
-      }
-      case MI_LOAD: {
-        std::string p = slot_path(save_slot);
-        if (machine->load_state(p)) {
-          set_status("Loaded slot " + std::to_string(save_slot));
-          // frame counter on the host is independent; keep going
-        } else set_status("Load failed");
-        break;
-      }
-      case MI_SLOT:
-        save_slot = save_slot % 5 + 1;
+      case MI_LOAD:
+        open_submenu(SubMenu::Load);
         break;
       case MI_COMPLETE_S1:
         machine->complete_stage1();
@@ -611,14 +718,20 @@ public:
       uint32_t r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
       fb[i] = 0xFF000000u | ((r / 3) << 16) | ((g / 3) << 8) | (b / 3);
     }
-    constexpr int box_x = 40, box_y = 28, box_w = 240, box_h = 150;
+    const bool sub = submenu != SubMenu::None;
+    const int rows = sub ? submenu_row_count() : MI_COUNT;
+    const int box_x = 40, box_y = 20, box_w = 240;
+    const int box_h = std::min(200, 36 + rows * 12 + 20);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, box_h, 0xFF101820);
     fill_rect(fb, amiga::FB_W, box_x, box_y, box_w, 1, 0xFF40A0FF);
     fill_rect(fb, amiga::FB_W, box_x, box_y + box_h - 1, box_w, 1, 0xFF40A0FF);
     fill_rect(fb, amiga::FB_W, box_x, box_y, 1, box_h, 0xFF40A0FF);
     fill_rect(fb, amiga::FB_W, box_x + box_w - 1, box_y, 1, box_h, 0xFF40A0FF);
 
-    draw_text(fb, amiga::FB_W, box_x + 8, box_y + 6, "DEBUG MENU", 0xFF40A0FF);
+    const char* title = "DEBUG MENU";
+    if (submenu == SubMenu::Save) title = "SAVE";
+    else if (submenu == SubMenu::Load) title = "LOAD";
+    draw_text(fb, amiga::FB_W, box_x + 8, box_y + 6, title, 0xFF40A0FF);
     char info[64];
     std::snprintf(info, sizeof(info), "frame %d  %s", frame_no,
                   machine && !machine->program_name().empty()
@@ -626,21 +739,45 @@ public:
                       : "-");
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + 16, info, 0xFF808890);
 
-    for (int i = 0; i < MI_COUNT; ++i) {
-      int y = box_y + 30 + i * 12;
-      uint32_t col = (i == menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
-      if (i == menu_sel)
-        fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
-      char line[64];
-      if (i == MI_SLOT)
-        std::snprintf(line, sizeof(line), "Slot: %d", save_slot);
-      else
-        std::snprintf(line, sizeof(line), "%s", menu_label(i, save_slot, fast));
-      draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
+    if (sub) {
+      auto slots = existing_slots();
+      for (int i = 0; i < rows; ++i) {
+        int y = box_y + 30 + i * 12;
+        uint32_t col = (i == submenu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
+        if (i == submenu_sel)
+          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
+        char line[64];
+        if (submenu_row_is_back(i)) {
+          std::snprintf(line, sizeof(line), "Back");
+        } else if (submenu_row_is_new(i)) {
+          std::snprintf(line, sizeof(line), "New save");
+        } else {
+          int slot = submenu_row_slot(i);
+          if (submenu == SubMenu::Save)
+            std::snprintf(line, sizeof(line), "Overwrite slot %d", slot);
+          else
+            std::snprintf(line, sizeof(line), "Slot %d", slot);
+        }
+        draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
+      }
+      if (submenu == SubMenu::Load && slots.empty()) {
+        draw_text(fb, amiga::FB_W, box_x + 12, box_y + 30 + 12, "(no saves yet)", 0xFF808890);
+      }
+    } else {
+      for (int i = 0; i < MI_COUNT; ++i) {
+        int y = box_y + 30 + i * 12;
+        uint32_t col = (i == menu_sel) ? 0xFFFFFF40 : 0xFFD0D0D0;
+        if (i == menu_sel)
+          fill_rect(fb, amiga::FB_W, box_x + 4, y - 1, box_w - 8, 10, 0xFF203040);
+        char line[64];
+        std::snprintf(line, sizeof(line), "%s", menu_label(i, fast));
+        draw_text(fb, amiga::FB_W, box_x + 12, y, line, col);
+      }
     }
 
     draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 14,
-              "Up/Down  A/Return  Back", 0xFF607080);
+              sub ? "Up/Down  A/Return  Esc/B Back" : "Up/Down  A/Return  Back",
+              0xFF607080);
     if (!status_msg.empty() && frame_no < status_until)
       draw_text(fb, amiga::FB_W, box_x + 8, box_y + box_h - 24, status_msg.c_str(),
                 0xFF80FF80);
@@ -711,19 +848,31 @@ public:
           }
           if (menu_open) {
             if (!down || e.key.repeat) break;
-            if (sc == SDL_SCANCODE_UP || sc == SDL_SCANCODE_W) {
-              menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
-            } else if (sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_S) {
-              menu_sel = (menu_sel + 1) % MI_COUNT;
-            } else if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_A) {
-              if (menu_sel == MI_SLOT) save_slot = save_slot <= 1 ? 5 : save_slot - 1;
-            } else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_D) {
-              if (menu_sel == MI_SLOT) save_slot = save_slot % 5 + 1;
-            } else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE ||
-                       sc == SDL_SCANCODE_Z || sc == SDL_SCANCODE_X) {
-              activate_menu();
-            } else if (sc == SDL_SCANCODE_ESCAPE) {
-              close_menu();
+            if (submenu != SubMenu::None) {
+              const int n = submenu_row_count();
+              if (n > 0) {
+                if (sc == SDL_SCANCODE_UP || sc == SDL_SCANCODE_W)
+                  submenu_sel = (submenu_sel + n - 1) % n;
+                else if (sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_S)
+                  submenu_sel = (submenu_sel + 1) % n;
+              }
+              if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE ||
+                  sc == SDL_SCANCODE_Z || sc == SDL_SCANCODE_X) {
+                activate_submenu();
+              } else if (sc == SDL_SCANCODE_ESCAPE) {
+                close_submenu();
+              }
+            } else {
+              if (sc == SDL_SCANCODE_UP || sc == SDL_SCANCODE_W) {
+                menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
+              } else if (sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_S) {
+                menu_sel = (menu_sel + 1) % MI_COUNT;
+              } else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE ||
+                         sc == SDL_SCANCODE_Z || sc == SDL_SCANCODE_X) {
+                activate_menu();
+              } else if (sc == SDL_SCANCODE_ESCAPE) {
+                close_menu();
+              }
             }
             break;
           }
@@ -857,18 +1006,32 @@ public:
       bool nav[5] = {
           ly < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_UP),
           ly > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN),
-          lx < -dead || btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT),
-          lx > dead || btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT),
+          false,
+          false,
           btn(SDL_CONTROLLER_BUTTON_A) || btn(SDL_CONTROLLER_BUTTON_X),
       };
-      if (nav[0] && !pad_menu_nav[0]) menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
-      if (nav[1] && !pad_menu_nav[1]) menu_sel = (menu_sel + 1) % MI_COUNT;
-      if (nav[2] && !pad_menu_nav[2] && menu_sel == MI_SLOT)
-        save_slot = save_slot <= 1 ? 5 : save_slot - 1;
-      if (nav[3] && !pad_menu_nav[3] && menu_sel == MI_SLOT)
-        save_slot = save_slot % 5 + 1;
-      if (nav[4] && !pad_menu_nav[4]) activate_menu();
-      for (int i = 0; i < 5; ++i) pad_menu_nav[i] = nav[i];
+      // B backs out of a submenu, or closes the debug menu.
+      if (btn(SDL_CONTROLLER_BUTTON_B) && !pad_menu_nav[2]) {
+        if (submenu != SubMenu::None) close_submenu();
+        else close_menu();
+        pad_menu_nav[2] = true;
+        up = down = left = right = fire = false;
+        return;
+      }
+      if (!btn(SDL_CONTROLLER_BUTTON_B)) pad_menu_nav[2] = false;
+      if (submenu != SubMenu::None) {
+        const int n = submenu_row_count();
+        if (n > 0) {
+          if (nav[0] && !pad_menu_nav[0]) submenu_sel = (submenu_sel + n - 1) % n;
+          if (nav[1] && !pad_menu_nav[1]) submenu_sel = (submenu_sel + 1) % n;
+        }
+        if (nav[4] && !pad_menu_nav[4]) activate_submenu();
+      } else {
+        if (nav[0] && !pad_menu_nav[0]) menu_sel = (menu_sel + MI_COUNT - 1) % MI_COUNT;
+        if (nav[1] && !pad_menu_nav[1]) menu_sel = (menu_sel + 1) % MI_COUNT;
+        if (nav[4] && !pad_menu_nav[4]) activate_menu();
+      }
+      for (int i = 0; i < 5; ++i) if (i != 2) pad_menu_nav[i] = nav[i];
       up = down = left = right = fire = false;
       return;
     }

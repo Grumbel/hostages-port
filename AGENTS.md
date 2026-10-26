@@ -112,8 +112,8 @@ No AmigaDOS file system.
   `+N`); `# args: ...` adds command line options. Input timing during the
   intro changes its course (Return opens the menu in "Hostages").
 - Debug menu (controller **Back** button or **F9**): pauses emulation and
-  shows an overlay. Items: Resume, Save/Load state (slots 1–5 under the
-  save dir `states/`), Slot selector, Complete stage I (pokes the marksmen
+  shows an overlay. Items: Resume, Save…/Load… (submenus list existing slots under the
+  save dir `states/`, plus New save), Complete stage I (pokes the marksmen
   target words for the active release), Soft reset, Screenshot, Fast
   forward toggle. Navigation: D-pad / cursor keys, A/Return to activate,
   Back/Esc/F9 to close. States are full machine snapshots (RAM, CPU,
