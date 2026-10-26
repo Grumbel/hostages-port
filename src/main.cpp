@@ -337,6 +337,44 @@ public:
     return 22;
   }
 
+  int menu_row_height(int row) const {
+    if (submenu != SubMenu::None) return submenu_row_height(row);
+    return 12;
+  }
+
+  int menu_list_rows() const {
+    return submenu != SubMenu::None ? submenu_row_count() : MI_COUNT;
+  }
+
+  int menu_sel_index() const {
+    return submenu != SubMenu::None ? submenu_sel : menu_sel;
+  }
+
+  // Keep the selection inside the scroll window (list area height list_h).
+  void ensure_menu_scroll(int list_h) {
+    const int rows = menu_list_rows();
+    if (rows <= 0) { menu_scroll = 0; return; }
+    int sel = menu_sel_index();
+    if (sel < 0) sel = 0;
+    if (sel >= rows) sel = rows - 1;
+    if (menu_scroll > sel) menu_scroll = sel;
+    if (menu_scroll < 0) menu_scroll = 0;
+
+    auto height_span = [&](int from, int to_exclusive) {
+      int h = 0;
+      for (int i = from; i < to_exclusive; ++i) h += menu_row_height(i);
+      return h;
+    };
+
+    // Advance scroll until the selection fits below menu_scroll.
+    while (menu_scroll < sel && height_span(menu_scroll, sel + 1) > list_h)
+      ++menu_scroll;
+
+    // Prefer a fuller window when near the end of the list.
+    while (menu_scroll > 0 && height_span(menu_scroll - 1, rows) <= list_h)
+      --menu_scroll;
+  }
+
   static std::string abbreviate_rank(const std::string& r) {
     if (r == "COMMANDER") return "CMD";
     if (r == "CAPTAIN") return "CAPT";
