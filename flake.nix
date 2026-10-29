@@ -12,18 +12,13 @@
     SDL2-win32.inputs.nixpkgs.follows = "nixpkgs";
     SDL2-win32.inputs.flake-utils.follows = "flake-utils";
 
-    arkos-sysroot = {
-      url = "github:grumnix/arkos-sysroot";
-      flake = false;
-    };
-
     sdl2-src = {
       url = "https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, SDL2-win32, arkos-sysroot, sdl2-src }:
+  outputs = { self, nixpkgs, flake-utils, SDL2-win32, sdl2-src }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -81,22 +76,8 @@
           sdlVersion = "2.30.3";
         };
 
-        r36s = import ./nix/r36s.nix {
-          inherit (pkgs) lib stdenv stdenvNoCC cmake pkg-config writeShellScript zip pkgsCross;
-          sysrootSrc = arkos-sysroot;
-          sysrootOverride =
-            let p = builtins.getEnv "HOSTAGES_ARKOS_SYSROOT";
-            in if p == "" then null else builtins.storePath p;
-        };
-
-        hostagesR36s = r36s.mkHostagesR36s {
-          src = lib.cleanSource ./.;
-          inherit version;
-        };
-        hostagesR36sPortMaster = r36s.mkHostagesR36sPortMaster {
-          r36sPkg = hostagesR36s;
-          inherit version;
-        };
+        # R36S / ArkOS: eoan sysroot, see nix/r36s.nix.
+        r36s = import ./nix/r36s.nix { inherit pkgs version; };
 
         androidSdk = (pkgs.androidenv.composeAndroidPackages {
           cmdLineToolsVersion = "11.0";
@@ -137,13 +118,10 @@
           hostages-wasm = wasm.hostagesWasm;
           sdl2-wasm = wasm.sdl2Wasm;
 
-          arkos-sysroot = r36s.arkosSysroot;
-          hostages-r36s = hostagesR36s;
-          hostages-r36s-portmaster = hostagesR36sPortMaster;
-          hostages-r36s-portmaster-zip = r36s.mkHostagesR36sPortMasterZip {
-            portMasterPkg = hostagesR36sPortMaster;
-            inherit version;
-          };
+          arkos-sysroot = r36s.sysroot;
+          hostages-r36s = r36s.r36s;
+          hostages-r36s-portmaster = r36s.portmaster;
+          hostages-r36s-portmaster-zip = r36s.portmasterZip;
 
           hostages-android = android.apk;
         };

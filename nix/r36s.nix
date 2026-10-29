@@ -1,437 +1,197 @@
-# R36S / ArkOS (RK3326) cross build against a published ArkOS sysroot.
+# SPDX-FileCopyrightText: 2026 Ingo Ruhnke <grumbel@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# The R36S handheld (RK3326, 640x480) running ArkOS, whose userland is
+# Ubuntu 19.10 (eoan): glibc 2.30, libstdc++ from GCC 9, SDL2 2.0.x. A
+# binary built against nixpkgs' glibc does not run there, so this builds
+# against a sysroot made of eoan's arm64 packages, from the Ubuntu archive
+# with their published hashes (same as kurvenrausch, gamepkgstd R36S.md).
+# The compiler is nixpkgs' aarch64 cross GCC, but every header and library
+# comes from the sysroot: libstdc++ 9's headers with its shared library (so
+# no ABI shims are needed), the shared libgcc_s; GCC's own libgcc.a supplies
+# only compiler builtins. On the device, SDL2 is ArkOS's (KMS/DRM, its own
+# build), the stable SDL2 ABI.
 #
-# The sysroot supplies aarch64 headers + shared libs (glibc ~2.30, SDL2 2.0.x, ALSA, …) so the
-# binary runs on stock ArkOS — plain pkgsCross would link modern glibc/libstdc++ instead.
-# Sysroot: github:grumnix/arkos-sysroot (flake input, pinned in flake.lock).
-# Same sysroot and compiler-wrapper approach as pingus (nix/r36s.nix there), trimmed to what
-# hostages needs: SDL2 only (no SDL2_image, OpenAL, zlib, GLES link — SDL loads GLES itself).
+#   nix build .#hostages-r36s                the binary
+#   nix build .#hostages-r36s-portmaster     a PortMaster port: copy to /roms/ports/
+#   nix build .#hostages-r36s-portmaster-zip for PortMaster's autoinstall
 #
-#   nix build .#arkos-sysroot
-#   nix build .#hostages-r36s
-#   nix build .#hostages-r36s-portmaster       # tree for /roms/ports
-#   nix build .#hostages-r36s-portmaster-zip   # PortMaster autoinstall zip
-#
-# SDL on the device may be as old as 2.0.10: do not use newer SDL API (no SDL_RenderGeometry).
-{ lib
-, stdenv
-, stdenvNoCC
-, cmake
-, pkg-config
-, pkgsCross
-, writeShellScript
-, zip
-  # Unpacked sysroot tree (usr/, lib/): flake input github:grumnix/arkos-sysroot
-, sysrootSrc
-  # Optional already-built sysroot store path to use instead (dev shortcut, needs --impure).
-, sysrootOverride ? null
+# The ADF is not redistributable: users copy it into ports/hostages/.
+
+{ pkgs
+, version
 }:
 
 let
-  khrplatformH = ../mk/r36s/include/KHR/khrplatform.h;
+  lib = pkgs.lib;
 
-  arkosSysroot = if sysrootOverride != null then sysrootOverride else stdenvNoCC.mkDerivation {
+  # eoan arm64 packages: glibc, the kernel headers, GCC 9's runtime and
+  # libstdc++ headers, SDL2 2.0.10 (headers and library to link against).
+  debs = [
+    { file = "pool/main/g/glibc/libc6_2.30-0ubuntu2_arm64.deb"; sha256 = "4853da1e3c9eae109708b30dc5df00b7ced888c09f0e77bf6731015a97fb859a"; }
+    { file = "pool/main/g/glibc/libc6-dev_2.30-0ubuntu2_arm64.deb"; sha256 = "a0b1860c16c50934a5fe3206ac386267d24b015b0ab677005d38e60ac1d27823"; }
+    { file = "pool/main/l/linux/linux-libc-dev_5.3.0-18.19_arm64.deb"; sha256 = "7575a37b1abf722f950fa8202c49f24b9c887dcf8e1f97bad15b555cb8c483de"; }
+    { file = "pool/main/g/gcc-9/libgcc1_9.2.1-9ubuntu2_arm64.deb"; sha256 = "81dfdee2c50f13dab98967b0062e51f1cebb967f407e3593c5a77ed2146ea008"; }
+    { file = "pool/main/g/gcc-9/libstdc++6_9.2.1-9ubuntu2_arm64.deb"; sha256 = "5af692b4ecf237979411acf74b7319785e09dd3450a917a94f3ea65cd260436e"; }
+    { file = "pool/main/g/gcc-9/libstdc++-9-dev_9.2.1-9ubuntu2_arm64.deb"; sha256 = "aa0efe55ba5002e2d3572271b6c0106dfb59f7a6c61be0a0c406c4836e12472b"; }
+    { file = "pool/main/g/gcc-9/libgcc-9-dev_9.2.1-9ubuntu2_arm64.deb"; sha256 = "4e4a83c4d83471eff726fd819b4e5d266fd01c0fbb66f1376718b78bfd4ae116"; }
+    { file = "pool/universe/libs/libsdl2/libsdl2-2.0-0_2.0.10+dfsg1-1ubuntu1_arm64.deb"; sha256 = "34f06694f13bbee317b89be868768e8fd5b030287431a630881f45ff99dc9264"; }
+    { file = "pool/universe/libs/libsdl2/libsdl2-dev_2.0.10+dfsg1-1ubuntu1_arm64.deb"; sha256 = "9eb97797c392b68449045d814f8763ca984853abefff94ababdc72270b7d65ea"; }
+  ];
+  fetchDeb = d: pkgs.fetchurl {
+    url = "http://old-releases.ubuntu.com/ubuntu/${d.file}";
+    inherit (d) sha256;
+  };
+
+  sysroot = pkgs.stdenvNoCC.mkDerivation {
     pname = "arkos-sysroot";
-    version = "0.1-openal";
-    src = sysrootSrc;
-
-    # Unpack-only: aarch64 ELF + linker scripts must not be touched by host fixup.
-    dontConfigure = true;
-    dontBuild = true;
-    dontFixup = true;
-    dontPatchELF = true;
-    dontStrip = true;
-    dontPatchShebangs = true;
-    dontCheckForBrokenSymlinks = true;
-
+    version = "eoan-arm64";
+    dontUnpack = true;
+    nativeBuildInputs = [ pkgs.dpkg ];
     installPhase = ''
-      runHook preInstall
-      mkdir -p "$out"
-
-      if [ -d usr ]; then
-        cp -a . "$out/"
-      elif [ -d sysroot/usr ]; then
-        cp -a sysroot/. "$out/"
-      else
-        top=
-        for d in *; do
-          if [ -d "$d/usr" ]; then top="$d"; break; fi
-        done
-        if [ -z "$top" ]; then
-          echo "arkos-sysroot: unrecognized tarball layout (no usr/)" >&2
-          exit 1
-        fi
-        cp -a "$top"/. "$out/"
-      fi
-      test -d "$out/usr" || { echo "arkos-sysroot: missing $out/usr" >&2; exit 1; }
-
-      for base in "$out/usr/include" "$out/usr/lib" "$out/lib"; do
-        if [ -d "$base/aarch64-linux-gnu" ] && [ ! -e "$base/aarch64-unknown-linux-gnu" ]; then
-          ln -sfn aarch64-linux-gnu "$base/aarch64-unknown-linux-gnu"
-        fi
+      mkdir -p $out
+      ${lib.concatMapStrings (d: "dpkg-deb -x ${fetchDeb d} $out\n") debs}
+      # Absolute symlinks point into the device's root: into the sysroot.
+      find $out -type l | while read -r link; do
+        target=$(readlink "$link")
+        case "$target" in
+          /*) ln -sfn "$out$target" "$link" ;;
+        esac
       done
-
-      mkdir -p "$out/usr/include/KHR"
-      cp -f ${khrplatformH} "$out/usr/include/KHR/khrplatform.h"
-
-      # Debian libc.so & co. are linker scripts with absolute /lib paths: rewrite only the
-      # multiarch prefixes, on token boundaries.
-      find "$out" -type f \( -name 'libc.so' -o -name 'libpthread.so' -o -name 'libm.so' -o -name 'libdl.so' -o -name 'librt.so' -o -name 'libutil.so' -o -name 'libresolv.so' -o -name 'libanl.so' -o -name 'libBrokenLocale.so' -o -name 'libthread_db.so' \) 2>/dev/null | while read -r f; do
-        if grep -qE 'GROUP|INPUT' "$f" 2>/dev/null; then
-          sed -i -E \
-            -e "s#(^|[[:space:](=])/usr/lib/aarch64-linux-gnu/#\1$out/usr/lib/aarch64-linux-gnu/#g" \
-            -e "s#(^|[[:space:](=])/lib/aarch64-linux-gnu/#\1$out/lib/aarch64-linux-gnu/#g" \
-            "$f" || true
-        fi
-      done
-
-      ln -sfn . "$out/sysroot"
-      echo "arkos-sysroot ready" > "$out/SYSROOT.txt"
-      runHook postInstall
+      # GCC 16's drivers link -lgcc_s_asneeded, a script of its own: the
+      # same here, for eoan's libgcc_s.
+      echo 'INPUT ( AS_NEEDED ( -lgcc_s ) )' > $out/usr/lib/gcc/${multiarch}/9/libgcc_s_asneeded.so
     '';
-
-    meta = with lib; {
-      description = "ArkOS / R36S aarch64 sysroot (glibc + SDL2 + GLES)";
-      license = licenses.free;
-      platforms = platforms.linux;
-      hydraPlatforms = [];
-    };
+    # aarch64 files: the host's fixups must keep off.
+    dontFixup = true;
   };
 
-  crossPkgs = pkgsCross.aarch64-multiplatform;
-  crossCc = crossPkgs.stdenv.cc;
-  targetPrefix = crossCc.targetPrefix;
+  cross = pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc;
+  gcc = cross.cc;
+  binutils = cross.bintools.bintools;
+  tp = lib.removeSuffix "-" cross.targetPrefix; # aarch64-unknown-linux-gnu
+  multiarch = "aarch64-linux-gnu";
+  gccLib = "${gcc}/lib/gcc/${tp}/${gcc.version}";
 
-  # Compiler wrappers. Compile: modern libstdc++ headers (old string ABI) + ArkOS glibc headers
-  # only. Link: ArkOS libstdc++/SDL2 by absolute path (GCC 15's libstdc++ needs GLIBCXX_3.4.32
-  # and glibc 2.38), static libgcc, ArkOS dynamic linker.
-  mkWrappers = sysroot: let
-    gcc = crossCc.cc;
-    tp = lib.removeSuffix "-" targetPrefix;
-    libdir = "${sysroot}/usr/lib/aarch64-linux-gnu";
-    cxxInc = "${gcc}/include/c++/${gcc.version}";
-    fixedInc = "${gcc}/lib/gcc/${tp}/${gcc.version}/include";
-    fixedInc2 = "${gcc}/lib/gcc/${tp}/${gcc.version}/include-fixed";
-    libgccDir = "${gcc}/lib/gcc/${tp}/${gcc.version}";
-    gccLibOut = lib.getLib gcc;
-    commonCompile = ''
-      -nostdinc \
-      --sysroot=${sysroot} \
-      -isystem ${fixedInc} \
-      -isystem ${fixedInc2} \
-      -isystem ${sysroot}/usr/include/aarch64-linux-gnu \
-      -isystem ${sysroot}/usr/include \
-      -pthread \
-      -fexceptions \
-      -march=armv8-a \
-      -mtune=cortex-a35 \
+  # Compiler drivers that see nothing but the sysroot (and GCC's own
+  # freestanding headers and builtins).
+  cflags = lib.concatStringsSep " " [
+    "-nostdinc"
+    "--sysroot=${sysroot}"
+    "-B${binutils}/${tp}/bin"
+    "-isystem ${gccLib}/include"
+    "-isystem ${sysroot}/usr/include/${multiarch}"
+    "-isystem ${sysroot}/usr/include"
+    "-march=armv8-a -mtune=cortex-a35"
+    # GCC 10+ calls helpers for atomics (__aarch64_ldadd4_rel ...) that
+    # GCC 9's libgcc lacks; the Cortex-A35 (ARMv8.0, no LSE) would take the
+    # plain instructions anyway.
+    "-mno-outline-atomics"
+  ];
+  cxxflags = lib.concatStringsSep " " [
+    "-nostdinc -nostdinc++"
+    "--sysroot=${sysroot}"
+    "-B${binutils}/${tp}/bin"
+    "-isystem ${sysroot}/usr/include/c++/9"
+    "-isystem ${sysroot}/usr/include/${multiarch}/c++/9"
+    "-isystem ${sysroot}/usr/include/c++/9/backward"
+    "-isystem ${gccLib}/include"
+    "-isystem ${sysroot}/usr/include/${multiarch}"
+    "-isystem ${sysroot}/usr/include"
+    "-march=armv8-a -mtune=cortex-a35"
+    "-mno-outline-atomics"
+  ];
+  ldflags = lib.concatStringsSep " " [
+    "-B${sysroot}/usr/lib/${multiarch}"
+    "-B${gccLib}"
+    "-L${sysroot}/usr/lib/gcc/${multiarch}/9"
+    "-L${sysroot}/usr/lib/${multiarch}"
+    "-L${sysroot}/lib/${multiarch}"
+    "-Wl,-rpath-link,${sysroot}/usr/lib/${multiarch}:${sysroot}/lib/${multiarch}"
+    "-Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.1"
+  ];
+  # Linking C++: the sysroot's libstdc++, never GCC's own (-nostdlib++).
+  driver = name: compiler: flags: linkFlags: libs: pkgs.writeShellScript name ''
+    for a in "$@"; do
+      case "$a" in
+        -c|-S|-E|-M|-MM) exec ${gcc}/bin/${tp}-${compiler} ${flags} "$@" ;;
+      esac
+    done
+    exec ${gcc}/bin/${tp}-${compiler} ${flags} ${linkFlags} "$@" ${libs}
+  '';
+  cc = driver "arkos-gcc" "gcc" cflags ldflags "-lm";
+  cxx = driver "arkos-g++" "g++" cxxflags "-nostdlib++ ${ldflags}" "-lstdc++ -lm -pthread";
+
+  # What the game links against instead of eoan's libSDL2, which needs
+  # ALSA, PulseAudio, X11, Wayland ... (not in the sysroot): a library of the
+  # same name exporting the same functions, empty. The device loads its own
+  # SDL2 by that name at run time.
+  sdlStub = pkgs.runCommand "libSDL2-link-stub" { } ''
+    mkdir -p $out/lib
+    ${binutils}/bin/${tp}-nm -D --defined-only ${sysroot}/usr/lib/${multiarch}/libSDL2-2.0.so.0 \
+      | awk '$2 == "T" { print "void " $3 "(void) {}" }' > stub.c
+    ${cc} -shared -fPIC -o $out/lib/libSDL2.so -Wl,-soname,libSDL2-2.0.so.0 stub.c
+  '';
+
+  r36s = pkgs.stdenv.mkDerivation {
+    pname = "hostages-r36s";
+    inherit version;
+    src = lib.cleanSource ../.;
+    nativeBuildInputs = [ pkgs.cmake ];
+    cmakeFlags = [
+      "-DCMAKE_SYSTEM_NAME=Linux"
+      "-DCMAKE_SYSTEM_PROCESSOR=aarch64"
+      "-DCMAKE_SYSROOT=${sysroot}"
+      "-DCMAKE_C_COMPILER=${cc}"
+      "-DCMAKE_CXX_COMPILER=${cxx}"
+      "-DCMAKE_AR=${binutils}/bin/${tp}-ar"
+      "-DCMAKE_RANLIB=${binutils}/bin/${tp}-ranlib"
+      "-DCMAKE_STRIP=${binutils}/bin/${tp}-strip"
+      "-DCMAKE_BUILD_TYPE=Release"
+      "-DCMAKE_SKIP_RPATH=ON"
+      "-DBUILD_TESTING=OFF"
+      "-DPROJECT_VERSION_FULL=${version}"
+      # eoan's SDL2 CMake / pkg-config files name /usr: give the sysroot's directly.
+      "-DSDL2_INCLUDE_DIRS=${sysroot}/usr/include/SDL2"
+      "-DSDL2_LIBRARIES=${sdlStub}/lib/libSDL2.so"
+    ];
+    # A device binary: no nix store RPATH, interpreter or shebangs.
+    dontPatchELF = true;
+    dontPatchShebangs = true;
+    postInstall = ''
+      ${binutils}/bin/${tp}-strip $out/bin/hostages
     '';
-    commonCompileCxx = ''
-      -nostdinc \
-      -D_GLIBCXX_USE_CXX11_ABI=0 \
-      --sysroot=${sysroot} \
-      -isystem ${cxxInc} \
-      -isystem ${cxxInc}/${tp} \
-      -isystem ${cxxInc}/backward \
-      -isystem ${fixedInc} \
-      -isystem ${fixedInc2} \
-      -isystem ${sysroot}/usr/include/aarch64-linux-gnu \
-      -isystem ${sysroot}/usr/include \
-      -pthread \
-      -fexceptions \
-      -march=armv8-a \
-      -mtune=cortex-a35 \
-    '';
-    commonLink = ''
-      --sysroot=${sysroot} \
-      -Wl,--sysroot=${sysroot} \
-      -Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.1 \
-      -B${libdir} \
-      -B${libgccDir} \
-      -L${libdir} \
-      -L${sysroot}/usr/lib \
-      -L${sysroot}/lib \
-      -L${sysroot}/lib/aarch64-linux-gnu \
-      -L${libgccDir} \
-      -L${gccLibOut}/lib \
-      -L${gccLibOut}/${tp}/lib \
-      -static-libgcc \
-      -Wl,-Bdynamic \
-      -l:libpthread.so.0 \
-      -lm \
-      -Wl,-rpath-link,${libdir} \
-      -Wl,-rpath-link,${sysroot}/lib/aarch64-linux-gnu \
-      -Wl,-rpath-link,${libdir}/pulseaudio \
-      -Wl,--allow-shlib-undefined \
-      -Wl,--as-needed \
-      -march=armv8-a \
-      -mtune=cortex-a35 \
-    '';
-  in {
-    cc = writeShellScript "aarch64-arkos-gcc" ''
-      export PATH="${crossCc.bintools}/bin:$PATH"
-      is_compile=
-      for a in "$@"; do
-        case "$a" in -c|-S|-E|-M|-MM|-MD|-MMD) is_compile=1 ;; esac
-      done
-      if [ -n "$is_compile" ]; then
-        exec ${gcc}/bin/${targetPrefix}gcc -B${crossCc.bintools}/bin ${commonCompile} "$@"
-      else
-        exec ${gcc}/bin/${targetPrefix}gcc -B${crossCc.bintools}/bin ${commonCompile} ${commonLink} "$@"
-      fi
-    '';
-    cxx = writeShellScript "aarch64-arkos-g++" ''
-      export PATH="${crossCc.bintools}/bin:$PATH"
-      is_compile=
-      for a in "$@"; do
-        case "$a" in -c|-S|-E|-M|-MM|-MD|-MMD) is_compile=1 ;; esac
-      done
-      if [ -n "$is_compile" ]; then
-        exec ${gcc}/bin/${targetPrefix}g++ -B${crossCc.bintools}/bin ${commonCompileCxx} "$@"
-      fi
-      first_existing() { for c in "$@"; do if [ -e "$c" ]; then echo "$c"; return 0; fi; done; return 1; }
-      stdcpp=$(first_existing "${libdir}/libstdc++.so" "${libdir}/libstdc++.so.6" \
-        "${sysroot}/usr/lib/libstdc++.so.6" "${sysroot}/lib/aarch64-linux-gnu/libstdc++.so.6") || {
-        echo "aarch64-arkos-g++: no libstdc++ in sysroot" >&2; exit 1; }
-      sdl2=$(first_existing "${libdir}/libSDL2-2.0.so" "${libdir}/libSDL2-2.0.so.0" "${libdir}/libSDL2.so") || {
-        echo "aarch64-arkos-g++: no libSDL2 in sysroot" >&2; exit 1; }
-      exec ${gcc}/bin/${targetPrefix}g++ \
-        -B${crossCc.bintools}/bin \
-        ${commonCompileCxx} \
-        -nostdlib++ \
-        ${commonLink} \
-        "$@" \
-        -Wl,--no-as-needed "$stdcpp" "$sdl2" \
-        -Wl,-Bdynamic -l:libpthread.so.0 -lm \
-        -Wl,--as-needed
+    dontStrip = true;
+  };
+
+  # PortMaster: the launcher script, the port folder and its metadata.
+  portmaster = pkgs.stdenvNoCC.mkDerivation {
+    pname = "hostages-r36s-portmaster";
+    inherit version;
+    dontUnpack = true;
+    dontPatchShebangs = true; # the launcher runs with the device's bash
+    dontFixup = true;
+    nativeBuildInputs = [ pkgs.librsvg ];
+    installPhase = ''
+      mkdir -p $out/hostages
+      install -m755 ${r36s}/bin/hostages $out/hostages/hostages
+      cp ${../LICENSES/GPL-3.0-or-later.txt} $out/hostages/LICENSE.txt
+      rsvg-convert -w 256 -h 256 ${../data/icons/hicolor/scalable/apps/hostages.svg} -o $out/hostages/cover.png
+      cp $out/hostages/cover.png $out/screenshot.png
+      cp ${../mk/r36s/Hostages.sh} $out/Hostages.sh
+      chmod +x $out/Hostages.sh
+      substitute ${../mk/r36s/port.json} $out/port.json --subst-var-by version ${version}
+      cp ${../mk/r36s/README.md} $out/README.md
+      cp ${../mk/r36s/README.md} $out/hostages/README.md
     '';
   };
 
-  mkHostagesR36s = {
-    src
-  , version
-  , pname ? "hostages-r36s"
-  }:
-    let
-      wrappers = mkWrappers arkosSysroot;
-    in
-    stdenv.mkDerivation {
-      inherit pname version src;
+  portmasterZip = pkgs.runCommand "hostages-${version}-r36s-portmaster.zip" { nativeBuildInputs = [ pkgs.zip ]; } ''
+    mkdir -p $out
+    cd ${portmaster}
+    zip -r -9 $out/hostages.zip .
+  '';
 
-      nativeBuildInputs = [ cmake pkg-config crossCc.bintools ];
-      strictDeps = true;
-
-      cmakeFlags = [
-        "-DCMAKE_SYSTEM_NAME=Linux"
-        "-DCMAKE_SYSTEM_PROCESSOR=aarch64"
-        "-DCMAKE_SYSROOT=${arkosSysroot}"
-        "-DCMAKE_FIND_ROOT_PATH=${arkosSysroot}"
-        "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER"
-        "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
-        "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
-        "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY"
-        "-DCMAKE_C_COMPILER=${wrappers.cc}"
-        "-DCMAKE_CXX_COMPILER=${wrappers.cxx}"
-        "-DCMAKE_C_COMPILER_WORKS=1"
-        "-DCMAKE_CXX_COMPILER_WORKS=1"
-        "-DCMAKE_C_COMPILER_FORCED=TRUE"
-        "-DCMAKE_CXX_COMPILER_FORCED=TRUE"
-        # The binary must use ArkOS libs at runtime, never nix store paths.
-        "-DCMAKE_SKIP_RPATH=ON"
-        "-DCMAKE_SKIP_INSTALL_RPATH=ON"
-        "-DCMAKE_BUILD_WITH_INSTALL_RPATH=OFF"
-        "-DCMAKE_INSTALL_RPATH="
-        "-DCMAKE_BUILD_TYPE=Release"
-        # GCC 15 headers vs ArkOS libstdc++: shim missing ABI symbols.
-        "-DHOSTAGES_CXXABI_SHIM=${../mk/r36s/cxxabi_shim.cpp}"
-        "-DPROJECT_VERSION_FULL=${version}"
-      ];
-
-      dontPatchELF = true;
-      dontStrip = true;
-      dontPatchShebangs = true;
-
-      preConfigure = ''
-        export NIX_DONT_SET_RPATH=1
-        export NIX_NO_SELF_RPATH=1
-        export PKG_CONFIG="pkg-config"
-        export PKG_CONFIG_SYSROOT_DIR="${arkosSysroot}"
-        export PKG_CONFIG_PATH=""
-        export PKG_CONFIG_LIBDIR="${arkosSysroot}/usr/lib/aarch64-linux-gnu/pkgconfig:${arkosSysroot}/usr/lib/pkgconfig:${arkosSysroot}/usr/share/pkgconfig"
-        pkg-config --modversion sdl2 || { echo "arkos-sysroot: sdl2.pc not found" >&2; exit 1; }
-      '';
-
-      meta = with lib; {
-        description = "hostages for R36S/ArkOS (sysroot-linked aarch64)";
-        license = licenses.gpl3Plus;
-        platforms = platforms.linux;
-        hydraPlatforms = [];
-      };
-    };
-
-  # PortMaster tree: Hostages.sh + hostages/ + metadata (copy to /roms/ports/).
-  mkHostagesR36sPortMaster = {
-    r36sPkg
-  , version
-  , pname ? "hostages-r36s-portmaster"
-  , title ? "Hostages"
-  , scriptName ? "Hostages.sh"
-  , portDirName ? "hostages"
-  , iconSrc ? ../data/icons/hicolor/scalable/apps/hostages.svg
-  }:
-    stdenvNoCC.mkDerivation {
-      inherit pname version;
-      dontUnpack = true;
-      dontConfigure = true;
-      dontBuild = true;
-      dontFixup = true;
-      dontPatchShebangs = true;  # device runs ArkOS /bin/bash; no nix store interpreter
-
-      installPhase = ''
-        set -euo pipefail
-        root="$out"
-        gamedir="$root/${portDirName}"
-        mkdir -p "$gamedir/conf" "$gamedir/licenses"
-
-        install -m755 "${r36sPkg}/bin/hostages" "$gamedir/hostages"
-        cp -f ${iconSrc} "$root/screenshot.png"
-        cp -f ${iconSrc} "$root/cover.png"
-        cp -f ${iconSrc} "$gamedir/cover.png"
-        cp -f ${../LICENSES/GPL-3.0-or-later.txt} "$gamedir/licenses/GPL-3.0-or-later.txt"
-
-        cat > "$root/${scriptName}" << 'EOF_LAUNCH'
-#!/bin/bash
-# Hostages — PortMaster launcher for R36S / ArkOS
-
-XDG_DATA_HOME=''${XDG_DATA_HOME:-$HOME/.local/share}
-
-if [ -d "/opt/system/Tools/PortMaster/" ]; then
-  controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then
-  controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
-  controlfolder="$XDG_DATA_HOME/PortMaster"
-else
-  controlfolder="/roms/ports/PortMaster"
-fi
-
-source "$controlfolder/control.txt"
-[ -f "''${controlfolder}/mod_''${CFW_NAME}.txt" ] && source "''${controlfolder}/mod_''${CFW_NAME}.txt"
-get_controls
-
-GAMEDIR="/$directory/ports/hostages"
-CONFDIR="$GAMEDIR/conf"
-
-mkdir -p "$CONFDIR" || { echo "cannot create $CONFDIR"; exit 1; }
-chmod -R u+rwX "$GAMEDIR" 2>/dev/null || true
-cd "$GAMEDIR" || exit 1
-
-if [ -w "$GAMEDIR" ]; then
-  > "$GAMEDIR/log.txt" 2>/dev/null && exec > >(tee -a "$GAMEDIR/log.txt") 2>&1 || true
-fi
-
-# Settings and saves live in the port's conf/ dir ($CONFDIR/hostages/), never in $HOME.
-# The game refuses to start if these are not absolute paths.
-export XDG_CONFIG_HOME="$CONFDIR"
-export XDG_STATE_HOME="$CONFDIR"
-export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-
-pm_platform_helper "$GAMEDIR/hostages" 2>/dev/null || true
-
-# Fullscreen = the 640x480 panel. Engines: triggers / L1 R1 / sticks up.
-./hostages "$@"
-pm_finish 2>/dev/null || true
-EOF_LAUNCH
-        chmod +x "$root/${scriptName}"
-
-        cat > "$root/port.json" << EOF_JSON
-{
-  "version": 2,
-  "name": "hostages.zip",
-  "items": ["${scriptName}", "${portDirName}"],
-  "items_opt": null,
-  "attr": {
-    "title": "${title}",
-    "desc": "Amiga Hostages (Infogrames, 1988) port. Requires a user-supplied ADF disk image.",
-    "inst": "Copy Hostages.sh and hostages/ into /roms/ports/. Place an ADF in hostages/.",
-    "genres": ["action", "arcade"],
-    "porter": ["Ingo Ruhnke"],
-    "image": {},
-    "rtr": false,
-    "runtime": null,
-    "reqs": [],
-    "arch": ["aarch64"]
-  }
-}
-EOF_JSON
-
-        cat > "$root/gameinfo.xml" << EOF_XML
-<?xml version="1.0" encoding="utf-8"?>
-<gameList>
-  <game>
-    <path>./${scriptName}</path>
-    <name>${title}</name>
-    <desc>Amiga Hostages (Infogrames) port. Supply your own ADF disk image.</desc>
-    <developer>Ingo Ruhnke</developer>
-    <genre>Arcade</genre>
-    <image>./${portDirName}/cover.png</image>
-  </game>
-</gameList>
-EOF_XML
-
-        cat > "$root/README.md" << 'EOF_README'
-## Hostages (R36S / ArkOS)
-
-Native aarch64 build linked against the ArkOS sysroot (SDL2).
-
-### Install
-Copy `Hostages.sh` and the `hostages/` directory to `/roms/ports/`, or put the zip in
-`ports/PortMaster/autoinstall/` and open PortMaster once.
-
-### Disk image
-Place a non-redistributable ADF (e.g. `Hostage (Infogrames).adf`) in the
-`hostages/` folder. Saves go under `hostages/conf/`.
-
-### Controls
-Gamepad: stick/D-pad move, A fire, B Esc, Y team menu, Back debug menu,
-Start/X confirm. F11 is fullscreen on keyboard; use the device hotkey if needed.
-EOF_README
-      '';
-
-      meta = with lib; {
-        description = "PortMaster package of hostages for R36S/ArkOS";
-        license = licenses.gpl3Plus;
-        platforms = platforms.linux;
-        hydraPlatforms = [];
-      };
-    };
-
-  mkHostagesR36sPortMasterZip = {
-    portMasterPkg
-  , version
-  , pname ? "hostages-r36s-portmaster-zip"
-  , zipName ? "hostages.zip"
-  }:
-    stdenvNoCC.mkDerivation {
-      inherit pname version;
-      dontUnpack = true;
-      dontConfigure = true;
-      dontBuild = true;
-      dontFixup = true;
-      dontPatchShebangs = true;
-      nativeBuildInputs = [ zip ];
-      installPhase = ''
-        set -euo pipefail
-        mkdir -p "$out"
-        ( cd "${portMasterPkg}" && zip -r -9 "$out/${zipName}" . )
-      '';
-      meta = with lib; {
-        description = "PortMaster autoinstall zip of hostages for R36S/ArkOS";
-        license = licenses.gpl3Plus;
-        platforms = platforms.linux;
-        hydraPlatforms = [];
-      };
-    };
-in
-{
-  inherit arkosSysroot mkHostagesR36s mkHostagesR36sPortMaster mkHostagesR36sPortMasterZip;
+in {
+  inherit sysroot r36s portmaster portmasterZip;
 }

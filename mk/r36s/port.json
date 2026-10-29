@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "name": "hostages.zip",
+  "items": ["Hostages.sh", "hostages"],
+  "items_opt": null,
+  "attr": {
+    "title": "Hostages",
+    "desc": "Port of the Amiga version of Hostages (Infogrames, 1988): free the embassy hostages with a team of marksmen and an assault squad.",
+    "inst": "Copy your own Hostages Amiga disk image (*.adf) into ports/hostages/. Version @version@.",
+    "genres": ["action", "strategy"],
+    "porter": ["Ingo Ruhnke"],
+    "image": {},
+    "rtr": false,
+    "runtime": null,
+    "reqs": [],
+    "arch": ["aarch64"]
+  }
+}

@@ -5,7 +5,7 @@
 - **Base commit:** `c83882de017a8a3fc198226a4107bdb81d9255b5`
 - **Tip:** packaging alignment with gamepkgstd — VERSION/flake/paths/CLI,
   multi-target (Windows, WASM, Android, R36S), desktop files, `--state-dir`,
-  R36S ArkOS wrappers + CXXABI shim, WASM IDBFS, thin Nix CI.
+  R36S (eoan .deb sysroot, user-supplied ADF), WASM IDBFS, thin Nix CI.
 
 ### Packaging status
 
@@ -14,7 +14,7 @@
 | Linux desktop | package + desktop/metainfo/svg/man | structure only |
 | Windows win64/win32 | `nix/windows.nix` + zip | not built here |
 | WASM | `nix/wasm.nix`, `step_frame`, IDBFS | not built here |
-| R36S PortMaster | dualthrust-style sysroot wrappers | not built here |
+| R36S PortMaster | eoan .deb sysroot (as kurvenrausch) | builds; ADF supplied by the user |
 | Android APK | `nix/android.nix` + `mk/android/` | not built here |
 
 Suggested checks: `nix build .#checks.version`, `.#hostages-win64-zip`,

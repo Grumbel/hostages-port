@@ -42,6 +42,13 @@ if(EMSCRIPTEN)
       INTERFACE_COMPILE_OPTIONS "-sUSE_SDL=2"
       INTERFACE_LINK_OPTIONS "-sUSE_SDL=2")
   endif()
+elseif(SDL2_LIBRARIES)
+  # Given directly (the R36S build links a stub against a sysroot whose
+  # CMake/pkg-config files name /usr, see nix/r36s.nix).
+  add_library(SDL2::SDL2 INTERFACE IMPORTED)
+  set_target_properties(SDL2::SDL2 PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIRS}"
+    INTERFACE_LINK_LIBRARIES "${SDL2_LIBRARIES}")
 else()
   find_package(SDL2 QUIET CONFIG)
   if(NOT TARGET SDL2::SDL2)
@@ -77,9 +84,6 @@ target_link_libraries(amiga PUBLIC m68k)
 add_executable(hostages src/main.cpp)
 target_link_libraries(hostages PRIVATE amiga SDL2::SDL2)
 
-if(HOSTAGES_CXXABI_SHIM)
-  target_sources(hostages PRIVATE "${HOSTAGES_CXXABI_SHIM}")
-endif()
 target_compile_definitions(hostages PRIVATE
   HOSTAGES_VERSION="${PROJECT_VERSION_FULL}"
 )
